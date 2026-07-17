@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly SESSION_NAME="${MONITORING_LAB_SESSION:-monitoring-lab}"
+readonly LAYOUT="${MONITORING_LAB_LAYOUT:-/opt/monitoring-lab/zellij/monitoring-lab.kdl}"
+
+[[ "$SHELL" == /bin/bash ]] || {
+    printf 'workstation: expected SHELL=/bin/bash, got %s\n' "${SHELL:-unset}" >&2
+    exit 1
+}
+[[ -r "$LAYOUT" ]] || {
+    printf 'workstation: missing Zellij layout: %s\n' "$LAYOUT" >&2
+    exit 1
+}
+
+cd "$HOME"
+if zellij list-sessions --no-formatting --short 2>/dev/null \
+    | grep -Fx "$SESSION_NAME" >/dev/null 2>&1
+then
+    exec zellij attach "$SESSION_NAME"
+fi
+
+exec zellij --session "$SESSION_NAME" --new-session-with-layout "$LAYOUT"

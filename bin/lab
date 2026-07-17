@@ -16,6 +16,7 @@ export MONITORING_LAB_STATE="$STATE_DIR"
 COLIMA_PROFILE="${MONITORING_LAB_COLIMA_PROFILE:-monitoring-lab}"
 LAB_DOCKER_CONTEXT="${MONITORING_LAB_DOCKER_CONTEXT:-}"
 COMPOSE_FLAVOR=""
+DOTFILES_DIR=""
 
 usage() {
     cat <<'EOF'
@@ -54,6 +55,33 @@ die() {
 
 need() {
     command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_dotfiles() {
+    local candidate
+    local -a candidates
+
+    if [[ -n "${MONITORING_LAB_DOTFILES:-}" ]]; then
+        candidates=("$MONITORING_LAB_DOTFILES")
+    else
+        candidates=(
+            "$HOME/dotfiles"
+            "$HOME/Documents/setup"
+            "$LAB_ROOT/../setup"
+        )
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        [[ -d "$candidate" && -x "$candidate/install-terminal.sh" ]] || continue
+        DOTFILES_DIR="$(CDPATH= cd -- "$candidate" && pwd -P)"
+        export MONITORING_LAB_DOTFILES="$DOTFILES_DIR"
+        return
+    done
+
+    if [[ -n "${MONITORING_LAB_DOTFILES:-}" ]]; then
+        die "MONITORING_LAB_DOTFILES does not contain install-terminal.sh: $MONITORING_LAB_DOTFILES"
+    fi
+    die "Protocol Ink dotfiles were not found; clone them to ~/dotfiles or set MONITORING_LAB_DOTFILES"
 }
 
 docker_cli() {
@@ -116,6 +144,7 @@ compose() {
 }
 
 prepare_runtime() {
+    resolve_dotfiles
     ensure_runtime
     select_compose
 }
@@ -299,16 +328,25 @@ wait_for_stack() {
 }
 
 up_stack() {
+    local -a build_services
+
     prepare_runtime
     bootstrap_state
-    if ! docker_cli image inspect monitoring-lab/mock-host:local >/dev/null 2>&1 \
-        || ! docker_cli image inspect monitoring-lab/icinga:2.16.4 >/dev/null 2>&1 \
-        || ! docker_cli image inspect monitoring-lab/nagios:4.5.13 >/dev/null 2>&1
-    then
+    build_services=()
+    docker_cli image inspect monitoring-lab/mock-host:local >/dev/null 2>&1 \
+        || build_services+=(bastion)
+    docker_cli image inspect monitoring-lab/icinga:2.16.4 >/dev/null 2>&1 \
+        || build_services+=(icinga)
+    docker_cli image inspect monitoring-lab/nagios:4.5.13 >/dev/null 2>&1 \
+        || build_services+=(nagios)
+    docker_cli image inspect monitoring-lab/workstation:ubuntu-24.04 >/dev/null 2>&1 \
+        || build_services+=(workstation)
+
+    if (( ${#build_services[@]} > 0 )); then
         note "building the monitoring lab images (first run)"
         # Only bastion owns the shared mock-host build definition. Building it
         # once avoids eleven builder jobs racing to tag the same image.
-        compose build bastion icinga nagios
+        compose build "${build_services[@]}"
     fi
     note "starting the monitoring lab"
     compose up --detach --no-build --remove-orphans
@@ -319,7 +357,7 @@ rebuild_stack() {
     prepare_runtime
     bootstrap_state
     note "rebuilding the monitoring lab images"
-    compose build bastion icinga nagios
+    compose build bastion icinga nagios workstation
     compose up --detach --no-build --remove-orphans
     wait_for_stack
 }
@@ -359,44 +397,30 @@ EOF
 }
 
 enter_lab() {
+    local outer_zellij exit_status
+
     up_stack
+    outer_zellij=0
 
-    if ! command -v zellij >/dev/null 2>&1; then
-        show_banner
-        cd "$LAB_ROOT"
-        exec "${SHELL:-/bin/sh}" -l
+    if [[ -n "${ZELLIJ:-}" ]] && command -v zellij >/dev/null 2>&1; then
+        outer_zellij=1
+        note "locking the outer macOS Zellij; Ctrl-g returns control to it"
+        zellij action switch-mode locked
+        trap 'zellij action switch-mode normal >/dev/null 2>&1 || true' EXIT HUP INT TERM
     fi
 
-    if [[ -n "${ZELLIJ:-}" ]]; then
-        if zellij action query-tab-names 2>/dev/null | grep -Fx 'LAB / CONTROL' >/dev/null 2>&1; then
-            zellij action go-to-tab-name 'LAB / CONTROL'
-        else
-            (cd "$LAB_ROOT" && zellij --layout "$LAB_ROOT/zellij/monitoring-lab.kdl")
-            zellij action go-to-tab-name 'LAB / CONTROL' 2>/dev/null || true
-        fi
-        return
-    fi
-
-    cd "$LAB_ROOT"
-    if zellij list-sessions --no-formatting --short 2>/dev/null | grep -Fx 'monitoring-lab' >/dev/null 2>&1; then
-        exec zellij attach monitoring-lab
+    note "entering Ubuntu 24.04 / Bash in the isolated workstation"
+    if compose exec workstation /usr/local/bin/enter-lab; then
+        exit_status=0
     else
-        exec zellij --session monitoring-lab \
-            --new-session-with-layout "$LAB_ROOT/zellij/monitoring-lab.kdl"
+        exit_status=$?
     fi
-}
 
-pane_shell() {
-    local pane_name
-    pane_name="${1:-control}"
-    prepare_runtime
-    show_banner
-    case "$pane_name" in
-        icinga) printf 'Icinga: lab shell icinga | lab logs icinga\n\n' ;;
-        nagios) printf 'Nagios: lab shell nagios | lab logs nagios\n\n' ;;
-    esac
-    cd "$LAB_ROOT"
-    exec "${SHELL:-/bin/sh}" -l
+    if (( outer_zellij == 1 )); then
+        zellij action switch-mode normal >/dev/null 2>&1 || true
+        trap - EXIT HUP INT TERM
+    fi
+    return "$exit_status"
 }
 
 set_app_state() {
@@ -513,7 +537,7 @@ shell_service() {
 }
 
 verify_lab() {
-    local host remote test_host test_state_file
+    local host remote workstation_remote test_host test_state_file
     up_stack
     note "validating Compose, Icinga, and Nagios configuration"
     compose config --quiet
@@ -521,12 +545,32 @@ verify_lab() {
     compose exec -T nagios /usr/local/nagios/bin/nagios -v \
         /usr/local/nagios/etc/nagios.cfg >/dev/null
 
+    note "validating the isolated Ubuntu, Bash, Neovim, and Zellij workstation"
+    compose exec -T workstation /bin/bash -lc '
+        set -euo pipefail
+        test "$SHELL" = /bin/bash
+        test "$(uname -s)" = Linux
+        test "$(nvim --version | head -n 1)" = "NVIM v0.12.4"
+        test "$(zellij --version)" = "zellij 0.44.3"
+        fzf --version | grep -q "^0.72.0 "
+        test -L "$HOME/.config/nvim/init.vim"
+        test -L "$HOME/.config/zellij/config.kdl"
+        nvim --headless "+colorscheme protocol-ink" \
+            "+if !empty(v:errmsg) | cquit 1 | endif" "+qall"
+        zellij --config "$HOME/.config/zellij/config.kdl" \
+            --config-dir "$HOME/.config/zellij" setup --check >/dev/null
+    '
+
     note "checking all ten SSH aliases through the bastion"
     while IFS=$'\t' read -r host _; do
         [[ "$host" == "name" || -z "$host" ]] && continue
         remote="$(ssh -F "$SSH_CONFIG" "$host" hostname)"
         [[ "$remote" == "$host" ]] || die "$host returned unexpected hostname '$remote'"
         ssh -F "$SSH_CONFIG" "$host" /usr/local/libexec/check_lab_middleware >/dev/null
+
+        workstation_remote="$(compose exec -T workstation ssh "$host" hostname | tr -d '\r')"
+        [[ "$workstation_remote" == "$host" ]] \
+            || die "workstation alias $host returned unexpected hostname '$workstation_remote'"
     done < "$INVENTORY_FILE"
 
     need curl
@@ -597,7 +641,6 @@ main() {
             compose down --remove-orphans
             ;;
         reset) reset_lab "$@" ;;
-        pane) pane_shell "$@" ;;
         banner)
             prepare_runtime
             show_banner

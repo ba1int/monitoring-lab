@@ -209,6 +209,63 @@ services:
     networks:
       - monitoring
 
+  workstation:
+    build:
+      context: ./images/workstation
+    image: monitoring-lab/workstation:ubuntu-24.04
+    pull_policy: never
+    restart: unless-stopped
+    hostname: wsl-lab
+    stdin_open: true
+    tty: true
+    environment:
+      HOME: /home/operator
+      USER: operator
+      LOGNAME: operator
+      SHELL: /bin/bash
+      XDG_CONFIG_HOME: /home/operator/.config
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      TERM: xterm-256color
+      COLORTERM: truecolor
+      EDITOR: nvim
+      VISUAL: nvim
+      LAB_ISOLATED: "1"
+    volumes:
+      - workstation-home:/home/operator
+      - type: bind
+        source: ${MONITORING_LAB_DOTFILES}
+        target: /opt/dotfiles
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./inventory/hosts.tsv
+        target: /opt/monitoring-lab/inventory/hosts.tsv
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./zellij/monitoring-lab.kdl
+        target: /opt/monitoring-lab/zellij/monitoring-lab.kdl
+        read_only: true
+        bind:
+          create_host_path: false
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.container:/run/secrets/lab_ssh_key:ro"
+    depends_on:
+      bastion:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    networks:
+      - monitoring
+
 networks:
   monitoring:
     driver: bridge
@@ -216,3 +273,4 @@ networks:
 volumes:
   icinga-data:
   nagios-data:
+  workstation-home:

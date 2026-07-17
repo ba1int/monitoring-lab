@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+case "${1:-control}" in
+    control)
+        cat <<'EOF'
+
+MONITORING LAB // ISOLATED WORKSTATION
+
+USERLAND      Ubuntu 24.04 LTS
+SHELL         Bash 5.2 (login shell)
+DOTFILES      /opt/dotfiles (read-only source)
+SSH           ssh lab-prod-app01
+INVENTORY     /opt/monitoring-lab/inventory/hosts.tsv
+
+This home directory belongs only to the lab. Exit Zellij to return to macOS.
+
+EOF
+        ;;
+    icinga)
+        cat <<'EOF'
+
+ICINGA // MASTER
+
+API           https://icinga:5665
+CREDENTIALS   lab / monitoring-lab
+HOST BROWSER  https://127.0.0.1:15665
+
+Example: curl -ksu lab:monitoring-lab https://icinga:5665/v1/status | jq
+
+EOF
+        ;;
+    nagios)
+        cat <<'EOF'
+
+NAGIOS // MASTER
+
+INTERNAL      http://nagios/nagios/
+CREDENTIALS   nagiosadmin / monitoring-lab
+HOST BROWSER  http://127.0.0.1:18081/nagios/
+
+Example: curl -su nagiosadmin:monitoring-lab http://nagios/nagios/cgi-bin/statusjson.cgi?query=hostlist | jq
+
+EOF
+        ;;
+    *)
+        printf 'workstation: unknown pane role: %s\n' "$1" >&2
+        exit 2
+        ;;
+esac
+
+exec /bin/bash --login

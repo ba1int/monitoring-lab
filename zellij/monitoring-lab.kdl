@@ -1,20 +1,20 @@
 layout {
-    tab name="LAB / CONTROL" focus=true {
-        pane name="control" command="./bin/lab" {
-            args "pane" "control"
-            cwd "."
+    tab name="WSL / CONTROL" focus=true {
+        pane name="bash" command="/usr/local/bin/lab-shell" {
+            args "control"
+            cwd "/home/operator"
         }
     }
     tab name="ICINGA" {
-        pane name="icinga" command="./bin/lab" {
-            args "pane" "icinga"
-            cwd "."
+        pane name="api" command="/usr/local/bin/lab-shell" {
+            args "icinga"
+            cwd "/home/operator"
         }
     }
     tab name="NAGIOS" {
-        pane name="nagios" command="./bin/lab" {
-            args "pane" "nagios"
-            cwd "."
+        pane name="core" command="/usr/local/bin/lab-shell" {
+            args "nagios"
+            cwd "/home/operator"
         }
     }
 }

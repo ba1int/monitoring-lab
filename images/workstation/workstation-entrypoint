@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+umask 077
+
+readonly DOTFILES_ROOT="${MONITORING_LAB_DOTFILES_ROOT:-/opt/dotfiles}"
+readonly INVENTORY_FILE="${MONITORING_LAB_INVENTORY:-/opt/monitoring-lab/inventory/hosts.tsv}"
+readonly KEY_SOURCE="${MONITORING_LAB_KEY_SOURCE:-/run/secrets/lab_ssh_key}"
+readonly READY_FILE="$HOME/.local/state/monitoring-lab/workstation-ready"
+
+log() {
+    printf '[workstation] %s\n' "$*" >&2
+}
+
+die() {
+    log "ERROR: $*"
+    exit 1
+}
+
+render_ssh_config() {
+    local host environment role site host_patterns
+
+    host_patterns=""
+    while IFS=$'\t' read -r host environment role site; do
+        [[ "$host" == "name" || -z "$host" ]] && continue
+        [[ "$host" =~ ^lab-[a-z0-9-]+$ ]] \
+            || die "invalid inventory host: $host"
+        host_patterns+=" $host"
+    done < "$INVENTORY_FILE"
+    [[ -n "$host_patterns" ]] || die "inventory contains no hosts"
+
+    cat > "$HOME/.ssh/config" <<EOF
+# Generated inside the isolated monitoring workstation.
+Host lab-bastion
+    HostName bastion
+    Port 22
+    User operator
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    BatchMode yes
+    UserKnownHostsFile ~/.ssh/known_hosts
+    StrictHostKeyChecking accept-new
+    ConnectTimeout 5
+    ServerAliveInterval 15
+    ServerAliveCountMax 2
+    LogLevel ERROR
+
+Host$host_patterns
+    HostName %h
+    Port 22
+    User operator
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    BatchMode yes
+    UserKnownHostsFile ~/.ssh/known_hosts
+    StrictHostKeyChecking accept-new
+    ConnectTimeout 5
+    ServerAliveInterval 15
+    ServerAliveCountMax 2
+    ProxyJump lab-bastion
+    LogLevel ERROR
+EOF
+    chmod 0600 "$HOME/.ssh/config"
+    # Mock containers generate fresh host keys when they are recreated. Keep
+    # this disposable trust store in lockstep so lab down/up stays idempotent.
+    : > "$HOME/.ssh/known_hosts"
+    chmod 0600 "$HOME/.ssh/known_hosts"
+}
+
+main() {
+    [[ -x "$DOTFILES_ROOT/install-terminal.sh" ]] \
+        || die "dotfiles are not mounted at $DOTFILES_ROOT"
+    [[ -r "$INVENTORY_FILE" ]] \
+        || die "inventory is not mounted at $INVENTORY_FILE"
+    [[ -s "$KEY_SOURCE" ]] \
+        || die "lab SSH identity is not mounted at $KEY_SOURCE"
+
+    mkdir -p \
+        "$HOME/.config" \
+        "$HOME/.local/bin" \
+        "$(dirname -- "$READY_FILE")" \
+        "$HOME/.ssh"
+    rm -f "$READY_FILE"
+
+    install -m 0600 "$KEY_SOURCE" "$HOME/.ssh/id_ed25519"
+    render_ssh_config
+
+    log "linking the mounted Protocol Ink dotfiles"
+    "$DOTFILES_ROOT/install-terminal.sh" --no-ghostty --with-shell --no-lab
+
+    printf 'ubuntu-24.04 bash\n' > "$READY_FILE"
+    log "Ubuntu workstation ready"
+    exec "$@"
+}
+
+main "$@"
