@@ -545,7 +545,7 @@ verify_lab() {
     compose exec -T nagios /usr/local/nagios/bin/nagios -v \
         /usr/local/nagios/etc/nagios.cfg >/dev/null
 
-    note "validating the isolated Ubuntu, Bash, Neovim, and Zellij workstation"
+    note "validating the isolated Ubuntu workstation and SSH host index"
     compose exec -T workstation /bin/bash -lc '
         set -euo pipefail
         test "$SHELL" = /bin/bash
@@ -553,6 +553,8 @@ verify_lab() {
         test "$(nvim --version | head -n 1)" = "NVIM v0.12.4"
         test "$(zellij --version)" = "zellij 0.44.3"
         fzf --version | grep -q "^0.72.0 "
+        test "$(hop --select lab-dev-db01 --print)" = lab-dev-db01
+        test "$(hop --list | awk "END { print NR }")" = 11
         test -L "$HOME/.config/nvim/init.vim"
         test -L "$HOME/.config/zellij/config.kdl"
         nvim --headless "+colorscheme protocol-ink" \

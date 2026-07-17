@@ -231,6 +231,7 @@ services:
       EDITOR: nvim
       VISUAL: nvim
       LAB_ISOLATED: "1"
+      HOP_INVENTORY: /opt/monitoring-lab/inventory/hosts.tsv
     volumes:
       - workstation-home:/home/operator
       - type: bind
