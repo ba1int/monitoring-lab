@@ -1,0 +1,58 @@
+#!/bin/sh
+
+# check_by_ssh rejects private keys that are readable by other users. Docker
+# secrets and read-only bind mounts do not always retain a usable mode, so copy
+# the lab key into a unique file owned by this check process before use.
+set -u
+
+plugin=${CHECK_BY_SSH_BIN:-/usr/lib/nagios/plugins/check_by_ssh}
+source_key=${LAB_SSH_KEY_SOURCE:-/run/secrets/lab_ssh_key}
+
+unknown() {
+    printf 'MIDDLEWARE UNKNOWN - %s\n' "$*"
+    exit 3
+}
+
+[ "$#" -eq 4 ] || unknown "expected host, user, remote command, and timeout"
+[ -x "$plugin" ] || unknown "check_by_ssh is not executable at $plugin"
+[ -f "$source_key" ] || unknown "lab SSH key is missing at $source_key"
+[ -r "$source_key" ] || unknown "lab SSH key is not readable at $source_key"
+
+host=$1
+user=$2
+remote_command=$3
+timeout=$4
+
+case "$timeout" in
+    ''|*[!0-9]*) unknown "timeout must be a positive integer" ;;
+    0) unknown "timeout must be greater than zero" ;;
+esac
+
+umask 077
+runtime_key=$(mktemp "${TMPDIR:-/tmp}/icinga-lab-key.XXXXXX") \
+    || unknown "could not create a temporary SSH key"
+
+cleanup() {
+    rm -f "$runtime_key"
+}
+trap cleanup EXIT HUP INT TERM
+
+if ! cat "$source_key" >"$runtime_key"; then
+    unknown "could not copy the lab SSH key"
+fi
+chmod 0600 "$runtime_key" || unknown "could not secure the temporary SSH key"
+
+"$plugin" \
+    -H "$host" \
+    -l "$user" \
+    -i "$runtime_key" \
+    -C "$remote_command" \
+    -t "$timeout" \
+    -o BatchMode=yes \
+    -o ConnectTimeout="$timeout" \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR
+status=$?
+
+exit "$status"

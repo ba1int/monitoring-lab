@@ -1,0 +1,20 @@
+layout {
+    tab name="LAB / CONTROL" focus=true {
+        pane name="control" command="./bin/lab" {
+            args "pane" "control"
+            cwd "."
+        }
+    }
+    tab name="ICINGA" {
+        pane name="icinga" command="./bin/lab" {
+            args "pane" "icinga"
+            cwd "."
+        }
+    }
+    tab name="NAGIOS" {
+        pane name="nagios" command="./bin/lab" {
+            args "pane" "nagios"
+            cwd "."
+        }
+    }
+}

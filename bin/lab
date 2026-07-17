@@ -1,0 +1,613 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+LAB_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$LAB_ROOT/compose.yaml"
+INVENTORY_FILE="$LAB_ROOT/inventory/hosts.tsv"
+STATE_DIR="${MONITORING_LAB_STATE:-$LAB_ROOT/.state}"
+if [[ "$STATE_DIR" != /* ]]; then
+    STATE_DIR="$PWD/$STATE_DIR"
+fi
+SSH_DIR="$STATE_DIR/ssh"
+SSH_CONFIG="$SSH_DIR/config"
+STATE_MARKER="$STATE_DIR/.monitoring-lab-state"
+export MONITORING_LAB_STATE="$STATE_DIR"
+COLIMA_PROFILE="${MONITORING_LAB_COLIMA_PROFILE:-monitoring-lab}"
+LAB_DOCKER_CONTEXT="${MONITORING_LAB_DOCKER_CONTEXT:-}"
+COMPOSE_FLAVOR=""
+
+usage() {
+    cat <<'EOF'
+Usage: lab [command]
+
+  lab                              Start the stack and enter/resume Zellij
+  lab up                           Start the stack without entering Zellij
+  lab rebuild                      Rebuild changed images and restart the stack
+  lab status                       Show container and endpoint status
+  lab hosts                        Show the mock inventory
+  lab ssh HOST [COMMAND...]        SSH through the lab bastion
+  lab shell SERVICE                Open a shell in a container
+  lab logs [SERVICE]               Follow container logs
+  lab fail HOST app [warning]      Break a middleware check (critical by default)
+  lab fail HOST host               Stop a mock host
+  lab heal HOST                    Start the host and restore middleware to OK
+  lab verify                       Run configuration, SSH, and monitoring checks
+  lab down                         Stop containers but retain lab state
+  lab reset [--yes]                Delete containers, volumes, keys, and state
+  lab help                         Show this help
+EOF
+}
+
+note() {
+    printf 'lab      %s\n' "$*"
+}
+
+warn() {
+    printf 'lab      warning: %s\n' "$*" >&2
+}
+
+die() {
+    printf 'lab      error: %s\n' "$*" >&2
+    exit 1
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+docker_cli() {
+    if [[ -n "$LAB_DOCKER_CONTEXT" ]]; then
+        docker --context "$LAB_DOCKER_CONTEXT" "$@"
+    else
+        docker "$@"
+    fi
+}
+
+ensure_runtime() {
+    need docker
+
+    if [[ "$(uname -s)" == "Darwin" ]] && command -v colima >/dev/null 2>&1; then
+        LAB_DOCKER_CONTEXT="${LAB_DOCKER_CONTEXT:-colima-$COLIMA_PROFILE}"
+        if ! docker --context "$LAB_DOCKER_CONTEXT" info >/dev/null 2>&1; then
+            note "starting isolated Colima profile $COLIMA_PROFILE"
+            colima start \
+                --profile "$COLIMA_PROFILE" \
+                --runtime docker \
+                --vm-type vz \
+                --cpu 4 \
+                --memory 8 \
+                --disk 40
+        fi
+    fi
+
+    docker_cli info >/dev/null 2>&1 || {
+        die "Docker is unavailable. On WSL, start Docker Desktop and enable this distribution under WSL Integration."
+    }
+}
+
+select_compose() {
+    if docker_cli compose version >/dev/null 2>&1; then
+        COMPOSE_FLAVOR="plugin"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_FLAVOR="standalone"
+    else
+        die "Docker Compose is not installed"
+    fi
+}
+
+compose() {
+    case "$COMPOSE_FLAVOR" in
+        plugin)
+            docker_cli compose --project-directory "$LAB_ROOT" -f "$COMPOSE_FILE" "$@"
+            ;;
+        standalone)
+            if [[ -n "$LAB_DOCKER_CONTEXT" ]]; then
+                docker-compose --context "$LAB_DOCKER_CONTEXT" \
+                    --project-directory "$LAB_ROOT" -f "$COMPOSE_FILE" "$@"
+            else
+                docker-compose --project-directory "$LAB_ROOT" -f "$COMPOSE_FILE" "$@"
+            fi
+            ;;
+        *)
+            die "internal error: Compose was not selected"
+            ;;
+    esac
+}
+
+prepare_runtime() {
+    ensure_runtime
+    select_compose
+}
+
+is_host() {
+    awk -F '\t' -v wanted="$1" 'NR > 1 && $1 == wanted { found=1 } END { exit !found }' "$INVENTORY_FILE"
+}
+
+require_host() {
+    is_host "$1" || die "unknown host '$1'; run 'lab hosts' for the inventory"
+}
+
+prepare_state_dir() {
+    local unexpected
+
+    mkdir -p "$STATE_DIR"
+    STATE_DIR="$(CDPATH= cd -- "$STATE_DIR" && pwd -P)"
+    SSH_DIR="$STATE_DIR/ssh"
+    SSH_CONFIG="$SSH_DIR/config"
+    STATE_MARKER="$STATE_DIR/.monitoring-lab-state"
+    export MONITORING_LAB_STATE="$STATE_DIR"
+
+    case "$STATE_DIR" in
+        /|"$HOME"|"$LAB_ROOT")
+            die "refusing unsafe monitoring state directory: $STATE_DIR"
+            ;;
+    esac
+
+    if [[ -e "$STATE_MARKER" ]]; then
+        [[ -f "$STATE_MARKER" ]] \
+            && grep -Fx 'monitoring-lab-state-v1' "$STATE_MARKER" >/dev/null 2>&1 \
+            || die "invalid monitoring lab state marker: $STATE_MARKER"
+        return
+    fi
+
+    unexpected="$(find "$STATE_DIR" -mindepth 1 -maxdepth 1 \
+        ! -name ssh ! -name hosts -print -quit)"
+    if [[ -n "$unexpected" ]] \
+        || { [[ -d "$STATE_DIR/ssh" || -d "$STATE_DIR/hosts" ]] \
+            && [[ ! -s "$STATE_DIR/ssh/id_ed25519" || ! -d "$STATE_DIR/hosts" ]]; }
+    then
+        die "$STATE_DIR is non-empty and is not recognizable as monitoring-lab state"
+    fi
+
+    printf 'monitoring-lab-state-v1\n' > "$STATE_MARKER"
+    chmod 0600 "$STATE_MARKER"
+}
+
+render_ssh_config() {
+    local host environment role site host_patterns
+
+    host_patterns=""
+    while IFS=$'\t' read -r host environment role site; do
+        [[ "$host" == "name" || -z "$host" ]] && continue
+        host_patterns+=" $host"
+    done < "$INVENTORY_FILE"
+    [[ -n "$host_patterns" ]] || die "inventory contains no hosts"
+
+    cat > "$SSH_CONFIG" <<EOF
+# Generated by monitoring-lab. Recreate with: lab reset
+Host lab-bastion
+    HostName 127.0.0.1
+    Port 2222
+    User operator
+    IdentityFile "$SSH_DIR/id_ed25519"
+    IdentitiesOnly yes
+    BatchMode yes
+    UserKnownHostsFile "$SSH_DIR/known_hosts"
+    StrictHostKeyChecking accept-new
+    ConnectTimeout 5
+    ServerAliveInterval 15
+    ServerAliveCountMax 2
+    LogLevel ERROR
+
+Host$host_patterns
+    HostName %h
+    Port 22
+    User operator
+    IdentityFile "$SSH_DIR/id_ed25519"
+    IdentitiesOnly yes
+    BatchMode yes
+    UserKnownHostsFile "$SSH_DIR/known_hosts"
+    StrictHostKeyChecking accept-new
+    ConnectTimeout 5
+    ServerAliveInterval 15
+    ServerAliveCountMax 2
+    ProxyJump lab-bastion
+    LogLevel ERROR
+EOF
+    chmod 0600 "$SSH_CONFIG"
+}
+
+wire_ssh_config() {
+    local config_home target
+    config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+    target="$config_home/monitoring-lab/ssh_config"
+    mkdir -p "$(dirname -- "$target")"
+
+    if [[ -L "$target" ]]; then
+        ln -sfn "$SSH_CONFIG" "$target"
+    elif [[ ! -e "$target" ]]; then
+        ln -s "$SSH_CONFIG" "$target"
+    elif ! cmp -s "$SSH_CONFIG" "$target"; then
+        warn "$target exists and is unmanaged; direct mock-host aliases may use that file"
+    fi
+}
+
+bootstrap_state() {
+    local host environment role site
+
+    prepare_state_dir
+    mkdir -p "$SSH_DIR" "$STATE_DIR/hosts"
+    if [[ ! -s "$SSH_DIR/id_ed25519" ]]; then
+        need ssh-keygen
+        note "generating a disposable lab-only SSH identity"
+        ssh-keygen -q -t ed25519 -N '' -C monitoring-lab -f "$SSH_DIR/id_ed25519"
+    fi
+    chmod 0600 "$SSH_DIR/id_ed25519"
+    chmod 0644 "$SSH_DIR/id_ed25519.pub"
+
+    # Containers receive a readable source and immediately copy it to a
+    # process-owned 0600 file before invoking OpenSSH.
+    cp -f "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.container"
+    chmod 0644 "$SSH_DIR/id_ed25519.container"
+    : > "$SSH_DIR/known_hosts"
+    chmod 0600 "$SSH_DIR/known_hosts"
+
+    while IFS=$'\t' read -r host environment role site; do
+        [[ "$host" == "name" || -z "$host" ]] && continue
+        mkdir -p "$STATE_DIR/hosts/$host"
+        if [[ ! -s "$STATE_DIR/hosts/$host/status" ]]; then
+            printf 'ok\n' > "$STATE_DIR/hosts/$host/status"
+        fi
+    done < "$INVENTORY_FILE"
+
+    render_ssh_config
+    wire_ssh_config
+}
+
+container_state() {
+    local service cid
+    service="$1"
+    cid="$(compose ps -q "$service" 2>/dev/null || true)"
+    [[ -n "$cid" ]] || {
+        printf 'missing'
+        return
+    }
+    docker_cli inspect --format \
+        '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$cid" 2>/dev/null || printf 'unknown'
+}
+
+wait_for_stack() {
+    local deadline service state pending
+    deadline=$((SECONDS + 360))
+
+    while (( SECONDS < deadline )); do
+        pending=0
+        while IFS= read -r service; do
+            state="$(container_state "$service")"
+            case "$state" in
+                healthy|running) ;;
+                unhealthy|exited|dead)
+                    compose ps
+                    compose logs --tail 80 "$service" >&2 || true
+                    die "$service entered state $state"
+                    ;;
+                *) pending=$((pending + 1)) ;;
+            esac
+        done < <(compose config --services)
+
+        if (( pending == 0 )); then
+            note "all lab services are ready"
+            return
+        fi
+        sleep 2
+    done
+
+    compose ps
+    die "timed out waiting for the lab to become healthy"
+}
+
+up_stack() {
+    prepare_runtime
+    bootstrap_state
+    if ! docker_cli image inspect monitoring-lab/mock-host:local >/dev/null 2>&1 \
+        || ! docker_cli image inspect monitoring-lab/icinga:2.16.4 >/dev/null 2>&1 \
+        || ! docker_cli image inspect monitoring-lab/nagios:4.5.13 >/dev/null 2>&1
+    then
+        note "building the monitoring lab images (first run)"
+        # Only bastion owns the shared mock-host build definition. Building it
+        # once avoids eleven builder jobs racing to tag the same image.
+        compose build bastion icinga nagios
+    fi
+    note "starting the monitoring lab"
+    compose up --detach --no-build --remove-orphans
+    wait_for_stack
+}
+
+rebuild_stack() {
+    prepare_runtime
+    bootstrap_state
+    note "rebuilding the monitoring lab images"
+    compose build bastion icinga nagios
+    compose up --detach --no-build --remove-orphans
+    wait_for_stack
+}
+
+require_stack() {
+    prepare_runtime
+    bootstrap_state
+    if [[ -z "$(compose ps -q icinga 2>/dev/null || true)" ]]; then
+        up_stack
+    fi
+}
+
+show_hosts() {
+    if command -v column >/dev/null 2>&1; then
+        column -t -s $'\t' "$INVENTORY_FILE"
+    else
+        cat "$INVENTORY_FILE"
+    fi
+}
+
+show_banner() {
+    local running
+    running="$(compose ps --status running --services 2>/dev/null | wc -l | tr -d ' ')"
+    cat <<EOF
+
+MONITORING LAB // CONTROL
+
+SERVICES      ${running:-0} running
+SSH           ssh lab-prod-app01
+ICINGA API    https://127.0.0.1:15665
+NAGIOS UI     http://127.0.0.1:18081/nagios/
+              nagiosadmin / monitoring-lab
+
+Try: lab hosts | lab status | lab fail lab-prod-app01 app | lab heal lab-prod-app01
+
+EOF
+}
+
+enter_lab() {
+    up_stack
+
+    if ! command -v zellij >/dev/null 2>&1; then
+        show_banner
+        cd "$LAB_ROOT"
+        exec "${SHELL:-/bin/sh}" -l
+    fi
+
+    if [[ -n "${ZELLIJ:-}" ]]; then
+        if zellij action query-tab-names 2>/dev/null | grep -Fx 'LAB / CONTROL' >/dev/null 2>&1; then
+            zellij action go-to-tab-name 'LAB / CONTROL'
+        else
+            (cd "$LAB_ROOT" && zellij --layout "$LAB_ROOT/zellij/monitoring-lab.kdl")
+            zellij action go-to-tab-name 'LAB / CONTROL' 2>/dev/null || true
+        fi
+        return
+    fi
+
+    cd "$LAB_ROOT"
+    if zellij list-sessions --no-formatting --short 2>/dev/null | grep -Fx 'monitoring-lab' >/dev/null 2>&1; then
+        exec zellij attach monitoring-lab
+    else
+        exec zellij --session monitoring-lab \
+            --new-session-with-layout "$LAB_ROOT/zellij/monitoring-lab.kdl"
+    fi
+}
+
+pane_shell() {
+    local pane_name
+    pane_name="${1:-control}"
+    prepare_runtime
+    show_banner
+    case "$pane_name" in
+        icinga) printf 'Icinga: lab shell icinga | lab logs icinga\n\n' ;;
+        nagios) printf 'Nagios: lab shell nagios | lab logs nagios\n\n' ;;
+    esac
+    cd "$LAB_ROOT"
+    exec "${SHELL:-/bin/sh}" -l
+}
+
+set_app_state() {
+    local host state
+    host="$1"
+    state="$2"
+    require_host "$host"
+    case "$state" in
+        ok|warning|critical) ;;
+        *) die "application state must be ok, warning, or critical" ;;
+    esac
+    printf '%s\n' "$state" > "$STATE_DIR/hosts/$host/status"
+}
+
+fail_host() {
+    local host kind state
+    host="${1:-}"
+    kind="${2:-app}"
+    state="${3:-critical}"
+    [[ -n "$host" ]] || die "usage: lab fail HOST app|host [warning|critical]"
+    require_stack
+    require_host "$host"
+
+    case "$kind" in
+        app)
+            set_app_state "$host" "$state"
+            note "$host middleware is now $state"
+            ;;
+        host)
+            compose stop "$host"
+            note "$host is stopped"
+            ;;
+        *)
+            die "failure kind must be 'app' or 'host'"
+            ;;
+    esac
+}
+
+heal_host() {
+    local host
+    host="${1:-}"
+    [[ -n "$host" ]] || die "usage: lab heal HOST"
+    require_stack
+    require_host "$host"
+    set_app_state "$host" ok
+    compose up --detach "$host"
+    note "$host is running and middleware is OK"
+}
+
+icinga_service_state() {
+    local host payload
+    host="$1"
+    payload="$(
+        curl --silent --show-error --insecure \
+            --user lab:monitoring-lab \
+            --get \
+            --data-urlencode "filter=service.__name==\"$host!middleware\"" \
+            'https://127.0.0.1:15665/v1/objects/services' 2>/dev/null || true
+    )"
+    printf '%s' "$payload" | tr -d '\n' \
+        | sed -n 's/.*"last_hard_state":[[:space:]]*\([0-3]\).*/\1/p'
+}
+
+nagios_service_state() {
+    local host payload
+    host="$1"
+    payload="$(
+        curl --silent --show-error \
+            --user nagiosadmin:monitoring-lab \
+            --get \
+            --data-urlencode 'query=service' \
+            --data-urlencode "hostname=$host" \
+            --data-urlencode 'servicedescription=Middleware health' \
+            'http://127.0.0.1:18081/nagios/cgi-bin/statusjson.cgi' 2>/dev/null || true
+    )"
+    printf '%s' "$payload" | tr -d '\n' \
+        | sed -n 's/.*"last_hard_state":[[:space:]]*\([0-3]\).*/\1/p'
+}
+
+wait_for_monitor_state() {
+    local host expected deadline icinga_state nagios_state
+    host="$1"
+    expected="$2"
+    deadline=$((SECONDS + 75))
+
+    while (( SECONDS < deadline )); do
+        icinga_state="$(icinga_service_state "$host")"
+        nagios_state="$(nagios_service_state "$host")"
+        if [[ "$icinga_state" == "$expected" && "$nagios_state" == "$expected" ]]; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    die "monitor convergence timed out for $host (wanted=$expected icinga=${icinga_state:-missing} nagios=${nagios_state:-missing})"
+}
+
+ssh_host() {
+    local host
+    host="${1:-}"
+    [[ -n "$host" ]] || die "usage: lab ssh HOST [COMMAND...]"
+    shift || true
+    require_stack
+    require_host "$host"
+    exec ssh -F "$SSH_CONFIG" "$host" "$@"
+}
+
+shell_service() {
+    local service
+    service="${1:-}"
+    [[ -n "$service" ]] || die "usage: lab shell SERVICE"
+    require_stack
+    compose exec "$service" /bin/sh
+}
+
+verify_lab() {
+    local host remote test_host test_state_file
+    up_stack
+    note "validating Compose, Icinga, and Nagios configuration"
+    compose config --quiet
+    compose exec -T icinga icinga2 daemon -C >/dev/null
+    compose exec -T nagios /usr/local/nagios/bin/nagios -v \
+        /usr/local/nagios/etc/nagios.cfg >/dev/null
+
+    note "checking all ten SSH aliases through the bastion"
+    while IFS=$'\t' read -r host _; do
+        [[ "$host" == "name" || -z "$host" ]] && continue
+        remote="$(ssh -F "$SSH_CONFIG" "$host" hostname)"
+        [[ "$remote" == "$host" ]] || die "$host returned unexpected hostname '$remote'"
+        ssh -F "$SSH_CONFIG" "$host" /usr/local/libexec/check_lab_middleware >/dev/null
+    done < "$INVENTORY_FILE"
+
+    need curl
+    test_host="lab-dev-app01"
+    test_state_file="$STATE_DIR/hosts/$test_host/status"
+
+    note "waiting for both monitors to report the baseline OK state"
+    wait_for_monitor_state "$test_host" 0
+
+    note "injecting a middleware CRITICAL and waiting for both monitors"
+    set_app_state "$test_host" critical
+    trap "printf 'ok\\n' > '$test_state_file'" EXIT
+    wait_for_monitor_state "$test_host" 2
+
+    note "healing middleware and waiting for both monitors to return OK"
+    set_app_state "$test_host" ok
+    wait_for_monitor_state "$test_host" 0
+    trap - EXIT
+
+    note "end-to-end verification passed"
+}
+
+reset_lab() {
+    local confirm
+    confirm="${1:-}"
+    if [[ "$confirm" != "--yes" ]]; then
+        printf 'Delete the monitoring lab containers, volumes, keys, and state? [y/N] '
+        read -r confirm
+        [[ "$confirm" == "y" || "$confirm" == "Y" ]] || return 0
+    fi
+    prepare_runtime
+    prepare_state_dir
+    compose down --volumes --remove-orphans
+    [[ -f "$STATE_MARKER" ]] \
+        && grep -Fx 'monitoring-lab-state-v1' "$STATE_MARKER" >/dev/null 2>&1 \
+        || die "refusing to remove unmarked state directory: $STATE_DIR"
+    rm -rf -- "$STATE_DIR"
+    note "lab state removed; the next start creates a fresh identity"
+}
+
+main() {
+    local command
+    command="${1:-enter}"
+    [[ $# -eq 0 ]] || shift
+
+    case "$command" in
+        enter) enter_lab ;;
+        up) up_stack ;;
+        rebuild) rebuild_stack ;;
+        status)
+            prepare_runtime
+            bootstrap_state
+            compose ps
+            ;;
+        hosts) show_hosts ;;
+        ssh) ssh_host "$@" ;;
+        shell) shell_service "$@" ;;
+        logs)
+            require_stack
+            compose logs --follow --tail 100 "$@"
+            ;;
+        fail) fail_host "$@" ;;
+        heal) heal_host "$@" ;;
+        verify) verify_lab ;;
+        down)
+            prepare_runtime
+            bootstrap_state
+            compose down --remove-orphans
+            ;;
+        reset) reset_lab "$@" ;;
+        pane) pane_shell "$@" ;;
+        banner)
+            prepare_runtime
+            show_banner
+            ;;
+        help|-h|--help) usage ;;
+        *)
+            usage >&2
+            die "unknown command '$command'"
+            ;;
+    esac
+}
+
+main "$@"

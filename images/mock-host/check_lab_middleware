@@ -1,0 +1,46 @@
+#!/bin/sh
+
+set -eu
+
+state_file="${LAB_STATE_FILE:-/state/status}"
+metadata_file="/etc/lab-metadata"
+
+metadata_value() {
+    key="$1"
+    sed -n "s/^${key}=//p" "$metadata_file" 2>/dev/null | head -n 1
+}
+
+if [ ! -r "$state_file" ]; then
+    printf 'MIDDLEWARE UNKNOWN - cannot read %s\n' "$state_file"
+    exit 3
+fi
+
+status="$(head -n 1 "$state_file" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+host="$(metadata_value host)"
+environment="$(metadata_value environment)"
+role="$(metadata_value role)"
+site="$(metadata_value site)"
+
+case "$status" in
+    ok)
+        label="OK"
+        code=0
+        ;;
+    warning)
+        label="WARNING"
+        code=1
+        ;;
+    critical)
+        label="CRITICAL"
+        code=2
+        ;;
+    *)
+        printf 'MIDDLEWARE UNKNOWN - invalid state %s in %s\n' "${status:-<empty>}" "$state_file"
+        exit 3
+        ;;
+esac
+
+printf 'MIDDLEWARE %s - host=%s environment=%s role=%s site=%s | state=%s;;;;\n' \
+    "$label" "${host:-unknown}" "${environment:-unknown}" \
+    "${role:-unknown}" "${site:-unknown}" "$code"
+exit "$code"

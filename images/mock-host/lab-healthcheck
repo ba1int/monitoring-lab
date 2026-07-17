@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+import http.client
+import os
+import socket
+import sys
+
+
+def is_true(value: str) -> bool:
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def check_tcp(port: int) -> None:
+    with socket.create_connection(("127.0.0.1", port), timeout=1.5):
+        pass
+
+
+def check_middleware(port: int) -> None:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1.5)
+    try:
+        connection.request("GET", "/ready")
+        response = connection.getresponse()
+        response.read()
+        if response.status != 200:
+            raise RuntimeError(f"middleware readiness returned HTTP {response.status}")
+    finally:
+        connection.close()
+
+
+def main() -> int:
+    try:
+        check_tcp(22)
+        if not is_true(os.environ.get("LAB_BASTION", "0")):
+            check_middleware(int(os.environ.get("LAB_MIDDLEWARE_PORT", "8080")))
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"unhealthy: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

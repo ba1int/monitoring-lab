@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+umask 027
+
+readonly OPERATOR_USER="operator"
+readonly OPERATOR_HOME="/home/operator"
+readonly SSHD_CONFIG="/etc/ssh/sshd_config.d/99-monitoring-lab.conf"
+
+log() {
+    printf '[mock-host] %s\n' "$*" >&2
+}
+
+die() {
+    log "ERROR: $*"
+    exit 1
+}
+
+is_true() {
+    case "${1,,}" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+sanitize_metadata() {
+    local value="${1:-unknown}"
+    value="${value//[^a-zA-Z0-9_.-]/-}"
+    value="${value:0:64}"
+    printf '%s' "${value:-unknown}"
+}
+
+install_authorized_key() {
+    local key_file="${LAB_AUTHORIZED_KEY_FILE:-/run/lab-ssh/authorized_key}"
+    local key_type key_count
+
+    [[ -f "$key_file" && -s "$key_file" ]] \
+        || die "mount a public key at $key_file (or set LAB_AUTHORIZED_KEY_FILE)"
+
+    key_count="$(
+        awk 'NF && $1 !~ /^#/ { count++ } END { print count + 0 }' "$key_file"
+    )"
+    [[ "$key_count" == "1" ]] \
+        || die "the authorized-key mount must contain exactly one public key"
+
+    key_type="$(awk 'NF && $1 !~ /^#/ { print $1; exit }' "$key_file")"
+    case "$key_type" in
+        ssh-ed25519|sk-ssh-ed25519@openssh.com|ecdsa-sha2-*|sk-ecdsa-sha2-*|ssh-rsa) ;;
+        *) die "unsupported or invalid SSH public key in $key_file" ;;
+    esac
+
+    ssh-keygen -l -f "$key_file" >/dev/null \
+        || die "could not parse the SSH public key in $key_file"
+
+    install -d -o "$OPERATOR_USER" -g "$OPERATOR_USER" -m 0700 \
+        "$OPERATOR_HOME/.ssh"
+    install -o "$OPERATOR_USER" -g "$OPERATOR_USER" -m 0600 \
+        "$key_file" "$OPERATOR_HOME/.ssh/authorized_keys"
+}
+
+write_metadata() {
+    local host environment role site
+
+    host="$(sanitize_metadata "${LAB_HOSTNAME:-$(hostname)}")"
+    environment="$(sanitize_metadata "${LAB_ENVIRONMENT:-lab}")"
+    role="$(sanitize_metadata "${LAB_ROLE:-middleware}")"
+    site="$(sanitize_metadata "${LAB_SITE:-home-lab}")"
+
+    cat > /etc/lab-metadata <<EOF
+host=$host
+environment=$environment
+role=$role
+site=$site
+EOF
+    chmod 0644 /etc/lab-metadata
+
+    cat > /etc/profile.d/10-monitoring-lab.sh <<EOF
+export LAB_HOSTNAME='$host'
+export LAB_ENVIRONMENT='$environment'
+export LAB_ROLE='$role'
+export LAB_SITE='$site'
+EOF
+    chmod 0644 /etc/profile.d/10-monitoring-lab.sh
+
+    cat > /etc/motd <<EOF
+
+MONITORING LAB // $environment
+HOST          $host
+ROLE          $role
+SITE          $site
+
+State: /state/status  [ok | warning | critical]
+
+EOF
+    chmod 0644 /etc/motd
+}
+
+prepare_state() {
+    local state_file="$1"
+    local state_dir
+
+    [[ "$state_file" == /* ]] || die "LAB_STATE_FILE must be an absolute path"
+    state_dir="$(dirname "$state_file")"
+    # The state directory is a host bind mount. Keep host ownership intact so
+    # `lab fail/heal` can mutate it; the workload only needs read access.
+    mkdir -p "$state_dir"
+
+    if [[ ! -e "$state_file" ]]; then
+        printf 'ok\n' > "$state_file"
+    fi
+    [[ -f "$state_file" ]] || die "$state_file is not a regular file"
+    chmod 0644 "$state_file"
+}
+
+write_sshd_config() {
+    local forwarding="no"
+    if is_true "${LAB_BASTION:-0}"; then
+        forwarding="yes"
+    fi
+
+    install -d -o root -g root -m 0755 /run/sshd /etc/ssh/sshd_config.d
+    ssh-keygen -A >/dev/null
+
+    cat > "$SSHD_CONFIG" <<EOF
+Port 22
+ListenAddress 0.0.0.0
+AddressFamily any
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+PidFile /run/sshd.pid
+AuthorizedKeysFile .ssh/authorized_keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+AllowUsers operator
+StrictModes yes
+UsePAM no
+UseDNS no
+X11Forwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+AllowTcpForwarding $forwarding
+GatewayPorts no
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+MaxAuthTries 3
+MaxSessions 10
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+PrintMotd yes
+PrintLastLog no
+LogLevel INFO
+Subsystem sftp internal-sftp
+EOF
+    chmod 0600 "$SSHD_CONFIG"
+    /usr/sbin/sshd -t -f "$SSHD_CONFIG"
+}
+
+shutdown_children() {
+    trap - INT TERM HUP
+    if [[ -n "${MIDDLEWARE_PID:-}" ]] && kill -0 "$MIDDLEWARE_PID" 2>/dev/null; then
+        kill -TERM "$MIDDLEWARE_PID" 2>/dev/null || true
+    fi
+    if [[ -n "${SSHD_PID:-}" ]] && kill -0 "$SSHD_PID" 2>/dev/null; then
+        kill -TERM "$SSHD_PID" 2>/dev/null || true
+    fi
+    [[ -z "${MIDDLEWARE_PID:-}" ]] || wait "$MIDDLEWARE_PID" 2>/dev/null || true
+    [[ -z "${SSHD_PID:-}" ]] || wait "$SSHD_PID" 2>/dev/null || true
+}
+
+main() {
+    local state_file="${LAB_STATE_FILE:-/state/status}"
+    local middleware_port="${LAB_MIDDLEWARE_PORT:-8080}"
+    local exit_status
+
+    case "$middleware_port" in
+        ''|*[!0-9]*) die "LAB_MIDDLEWARE_PORT must be a number" ;;
+    esac
+    (( middleware_port >= 1024 && middleware_port <= 65535 )) \
+        || die "LAB_MIDDLEWARE_PORT must be between 1024 and 65535"
+
+    install_authorized_key
+    write_metadata
+    write_sshd_config
+
+    if ! is_true "${LAB_BASTION:-0}"; then
+        prepare_state "$state_file"
+    fi
+
+    if (( $# > 0 )); then
+        exec "$@"
+    fi
+
+    trap shutdown_children INT TERM HUP
+
+    log "starting sshd (TCP forwarding: $(is_true "${LAB_BASTION:-0}" && printf enabled || printf disabled))"
+    /usr/sbin/sshd -D -e -f "$SSHD_CONFIG" &
+    SSHD_PID=$!
+
+    if is_true "${LAB_BASTION:-0}"; then
+        set +e
+        wait "$SSHD_PID"
+        exit_status=$?
+        set -e
+    else
+        log "starting middleware endpoint on :$middleware_port"
+        LAB_STATE_FILE="$state_file" \
+        LAB_MIDDLEWARE_PORT="$middleware_port" \
+            setpriv \
+                --reuid="$OPERATOR_USER" \
+                --regid="$OPERATOR_USER" \
+                --init-groups \
+                /usr/local/libexec/lab-middleware-server &
+        MIDDLEWARE_PID=$!
+
+        set +e
+        wait -n "$SSHD_PID" "$MIDDLEWARE_PID"
+        exit_status=$?
+        set -e
+    fi
+
+    shutdown_children
+    exit "$exit_status"
+}
+
+main "$@"

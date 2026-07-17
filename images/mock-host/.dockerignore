@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!lab-entrypoint
+!lab-healthcheck
+!middleware_server.py
+!check_lab_middleware

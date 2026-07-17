@@ -1,0 +1,218 @@
+name: monitoring-lab
+
+x-mock-host: &mock-host
+  image: monitoring-lab/mock-host:local
+  pull_policy: never
+  restart: unless-stopped
+  networks:
+    - monitoring
+
+x-monitor-dependencies: &monitor-dependencies
+  lab-prod-app01:
+    condition: service_healthy
+  lab-prod-app02:
+    condition: service_healthy
+  lab-prod-web01:
+    condition: service_healthy
+  lab-prod-mq01:
+    condition: service_healthy
+  lab-test-app01:
+    condition: service_healthy
+  lab-test-web01:
+    condition: service_healthy
+  lab-test-mq01:
+    condition: service_healthy
+  lab-dev-app01:
+    condition: service_healthy
+  lab-dev-web01:
+    condition: service_healthy
+  lab-dev-db01:
+    condition: service_healthy
+
+services:
+  bastion:
+    <<: *mock-host
+    build:
+      context: ./images/mock-host
+    hostname: lab-bastion
+    environment:
+      LAB_BASTION: "1"
+      LAB_HOSTNAME: lab-bastion
+      LAB_ENVIRONMENT: LAB
+      LAB_ROLE: bastion
+      LAB_SITE: home
+    ports:
+      - "127.0.0.1:2222:22"
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+
+  lab-prod-app01:
+    <<: *mock-host
+    hostname: lab-prod-app01
+    environment:
+      LAB_HOSTNAME: lab-prod-app01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: middleware
+      LAB_SITE: dc1
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-prod-app01:/state"
+
+  lab-prod-app02:
+    <<: *mock-host
+    hostname: lab-prod-app02
+    environment:
+      LAB_HOSTNAME: lab-prod-app02
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: middleware
+      LAB_SITE: dc2
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-prod-app02:/state"
+
+  lab-prod-web01:
+    <<: *mock-host
+    hostname: lab-prod-web01
+    environment:
+      LAB_HOSTNAME: lab-prod-web01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: web
+      LAB_SITE: dc1
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-prod-web01:/state"
+
+  lab-prod-mq01:
+    <<: *mock-host
+    hostname: lab-prod-mq01
+    environment:
+      LAB_HOSTNAME: lab-prod-mq01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: messaging
+      LAB_SITE: dc1
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-prod-mq01:/state"
+
+  lab-test-app01:
+    <<: *mock-host
+    hostname: lab-test-app01
+    environment:
+      LAB_HOSTNAME: lab-test-app01
+      LAB_ENVIRONMENT: TEST
+      LAB_ROLE: middleware
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-test-app01:/state"
+
+  lab-test-web01:
+    <<: *mock-host
+    hostname: lab-test-web01
+    environment:
+      LAB_HOSTNAME: lab-test-web01
+      LAB_ENVIRONMENT: TEST
+      LAB_ROLE: web
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-test-web01:/state"
+
+  lab-test-mq01:
+    <<: *mock-host
+    hostname: lab-test-mq01
+    environment:
+      LAB_HOSTNAME: lab-test-mq01
+      LAB_ENVIRONMENT: TEST
+      LAB_ROLE: messaging
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-test-mq01:/state"
+
+  lab-dev-app01:
+    <<: *mock-host
+    hostname: lab-dev-app01
+    environment:
+      LAB_HOSTNAME: lab-dev-app01
+      LAB_ENVIRONMENT: DEV
+      LAB_ROLE: middleware
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dev-app01:/state"
+
+  lab-dev-web01:
+    <<: *mock-host
+    hostname: lab-dev-web01
+    environment:
+      LAB_HOSTNAME: lab-dev-web01
+      LAB_ENVIRONMENT: DEV
+      LAB_ROLE: web
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dev-web01:/state"
+
+  lab-dev-db01:
+    <<: *mock-host
+    hostname: lab-dev-db01
+    environment:
+      LAB_HOSTNAME: lab-dev-db01
+      LAB_ENVIRONMENT: DEV
+      LAB_ROLE: database
+      LAB_SITE: lab
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dev-db01:/state"
+
+  icinga:
+    build:
+      context: ./images/icinga
+    image: monitoring-lab/icinga:2.16.4
+    restart: unless-stopped
+    environment:
+      ICINGA_MASTER: "1"
+    ports:
+      - "127.0.0.1:15665:5665"
+    volumes:
+      - icinga-data:/data
+      - ./config/icinga2/api-users.conf:/data/etc/icinga2/conf.d/api-users.conf:ro
+      - ./config/icinga2/commands.conf:/data/etc/icinga2/conf.d/commands.conf:ro
+      - ./config/icinga2/hosts.conf:/data/etc/icinga2/conf.d/hosts.conf:ro
+      - ./config/icinga2/services.conf:/data/etc/icinga2/conf.d/services.conf:ro
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.container:/run/secrets/lab_ssh_key:ro"
+    depends_on: *monitor-dependencies
+    healthcheck:
+      test: ["CMD", "/usr/lib/nagios/plugins/check_tcp", "-H", "127.0.0.1", "-p", "5665"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+    networks:
+      - monitoring
+
+  nagios:
+    build:
+      context: .
+      dockerfile: images/nagios/Dockerfile
+    image: monitoring-lab/nagios:4.5.13
+    restart: unless-stopped
+    environment:
+      NAGIOSADMIN_PASSWORD: monitoring-lab
+    ports:
+      - "127.0.0.1:18081:80"
+    volumes:
+      - nagios-data:/usr/local/nagios/var
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.container:/run/secrets/lab_ssh_key:ro"
+    depends_on: *monitor-dependencies
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  icinga-data:
+  nagios-data:
