@@ -231,7 +231,15 @@ services:
       EDITOR: nvim
       VISUAL: nvim
       LAB_ISOLATED: "1"
-      HOP_INVENTORY: /opt/monitoring-lab/inventory/hosts.tsv
+      OPS_INVENTORY: /opt/monitoring-lab/inventory/hosts.tsv
+      KB_ROOT: /opt/monitoring-lab/knowledge/cheatsheets
+      PULSE_ICINGA_URL: https://icinga:5665
+      PULSE_ICINGA_USER: lab
+      PULSE_ICINGA_PASSWORD: monitoring-lab
+      PULSE_ICINGA_INSECURE: "1"
+      PULSE_NAGIOS_URL: http://nagios/nagios/cgi-bin/statusjson.cgi
+      PULSE_NAGIOS_USER: nagiosadmin
+      PULSE_NAGIOS_PASSWORD: monitoring-lab
     volumes:
       - workstation-home:/home/operator
       - type: bind
@@ -243,6 +251,12 @@ services:
       - type: bind
         source: ./inventory/hosts.tsv
         target: /opt/monitoring-lab/inventory/hosts.tsv
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./knowledge/cheatsheets
+        target: /opt/monitoring-lab/knowledge/cheatsheets
         read_only: true
         bind:
           create_host_path: false

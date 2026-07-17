@@ -43,7 +43,7 @@ The first run generates a dedicated SSH identity, starts the container runtime
 and Compose services, waits for health checks, and creates or resumes the
 `monitoring-lab` Zellij session **inside an Ubuntu 24.04 container**. Every tab
 therefore runs Linux Zellij and a Bash 5.2 login shell rather than inheriting
-the Mac's zsh. The container links the same Protocol Ink Neovim, Zellij, and
+the client shell. The container links the same Protocol Ink Neovim, Zellij, and
 shell configuration that will be used in WSL.
 
 The workstation has its own persistent Linux home volume. The dotfiles checkout
@@ -62,13 +62,22 @@ The project also works without the dotfiles wrapper:
 ./bin/lab
 ```
 
-Useful operations:
+Inside the isolated workstation (`lab`), use the terminal tools and direct SSH:
+
+```sh
+hop
+peek lab-prod-app01
+kb middleware
+pulse
+ssh lab-prod-app01
+```
+
+From a separate host terminal, control the lab itself:
 
 ```sh
 lab hosts
 lab status
 lab ssh lab-prod-app01
-ssh lab-prod-app01
 
 lab fail lab-prod-app01 app
 lab fail lab-prod-app01 app warning
@@ -86,6 +95,41 @@ Direct aliases such as `ssh lab-prod-app01` work when the dotfiles installer has
 added the optional `~/.config/monitoring-lab/ssh_config` include. Only the ten
 inventory names are generated; unrelated `lab-*` SSH names are left alone.
 `lab ssh HOST` always uses the generated lab config explicitly.
+
+## Protocol Ops demo
+
+The workstation wires the shared inventory into four modular terminal tools:
+
+- `hop` selects a host and opens SSH;
+- `peek` renders a one-connection host record;
+- `kb` searches four lab cheatsheets mounted read-only from
+  `knowledge/cheatsheets/`; and
+- `pulse` combines active hard-state problems from the Icinga and Nagios APIs.
+
+Try a complete problem path across the deliberately separated control and
+workstation shells. In a host terminal, inject a failure:
+
+```sh
+lab fail lab-prod-app01 app
+```
+
+After hard-state convergence, inspect it inside the workstation:
+
+```sh
+pulse
+peek lab-prod-app01
+kb middleware
+```
+
+Then heal it from the host terminal:
+
+```sh
+lab heal lab-prod-app01
+```
+
+The lab injects only mock credentials and local URLs. Real-machine inventory,
+knowledge roots, monitoring endpoints, credentials, check profiles, and custom
+adapters remain machine-local configuration.
 
 ## Runtime
 

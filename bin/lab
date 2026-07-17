@@ -555,6 +555,13 @@ verify_lab() {
         fzf --version | grep -q "^0.72.0 "
         test "$(hop --select lab-dev-db01 --print)" = lab-dev-db01
         test "$(hop --list | awk "END { print NR }")" = 11
+        test "$(kb --list | awk "END { print NR }")" = 5
+        peek --no-monitoring lab-dev-db01 | grep -F "HOST RECORD / lab-dev-db01" >/dev/null
+        pulse_summary=$(pulse --summary lab-dev-db01)
+        printf "%s\n" "$pulse_summary" \
+            | grep -Eq "^ICINGA (OK|WARN|CRIT|UNKNOWN) / NAGIOS (OK|WARN|CRIT|UNKNOWN)$"
+        pulse_rows=$(pulse --list)
+        test "$(printf "%s\n" "$pulse_rows" | awk -F "\t" "NR == 1 { print NF }")" = 6
         test -L "$HOME/.config/nvim/init.vim"
         test -L "$HOME/.config/zellij/config.kdl"
         nvim --headless "+colorscheme protocol-ink" \
@@ -586,10 +593,17 @@ verify_lab() {
     set_app_state "$test_host" critical
     trap "printf 'ok\\n' > '$test_state_file'" EXIT
     wait_for_monitor_state "$test_host" 2
+    compose exec -T workstation /bin/bash -lc '
+        test "$(pulse --list | grep -F lab-dev-app01 | grep -c CRIT)" = 2
+    '
 
     note "healing middleware and waiting for both monitors to return OK"
     set_app_state "$test_host" ok
     wait_for_monitor_state "$test_host" 0
+    compose exec -T workstation /bin/bash -lc '
+        pulse_rows=$(pulse --list)
+        ! printf "%s\n" "$pulse_rows" | grep -F lab-dev-app01 >/dev/null
+    '
     trap - EXIT
 
     note "end-to-end verification passed"

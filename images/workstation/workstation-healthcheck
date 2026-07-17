@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+PATH="$HOME/.local/bin:$PATH"
+export PATH
 
 test "$SHELL" = /bin/bash
 test "$(uname -s)" = Linux
@@ -8,4 +10,8 @@ test -s "$HOME/.local/state/monitoring-lab/workstation-ready"
 test -r "$HOME/.ssh/config"
 test -r "$HOME/.config/nvim/init.vim"
 test -r "$HOME/.config/zellij/config.kdl"
-command -v bash ssh nvim zellij fzf rg bat hop >/dev/null
+test -r "$HOME/.local/share/protocol-ops/runtime.sh"
+test -d "$KB_ROOT"
+for tool in bash ssh nvim zellij fzf rg bat hop peek kb pulse; do
+    command -v "$tool" >/dev/null
+done
