@@ -1,5 +1,8 @@
 # SSH tool candidate benchmark
 
+The bounded execution-improvement sprint is recorded in
+[`OVERNIGHT-2026-07-18.md`](OVERNIGHT-2026-07-18.md).
+
 This microbenchmark evaluates three proposed `pi-tools` changes against the
 current `ssh_exec` transport inside the WSL-like workstation:
 
