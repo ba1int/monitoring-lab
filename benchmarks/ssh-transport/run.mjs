@@ -51,6 +51,8 @@ line("Connection reuse baseline median", `${results.multiplexing.baseline.median
 line("Connection reuse warm median", `${results.multiplexing.multiplexed_warm.median_ms} ms`);
 line("Connection reuse median saved", `${results.multiplexing.median_saved_percent}%`);
 line("Connection reuse threshold", results.multiplexing.candidate_pass ? "PASS" : "FAIL");
+line("Concurrent same-host calls", results.reuse_reliability.concurrent_same_host_pass ? "PASS" : "FAIL");
+line("Dead-master recovery", results.reuse_reliability.stale_socket_recovery_pass ? "PASS" : "FAIL");
 process.stdout.write("\n");
 line("Parallel ssh_exec latency", `${results.fanout.current_parallel_ssh_exec_ms} ms`);
 line("Bounded fanout latency", `${results.fanout.bounded_fanout_ms} ms`);

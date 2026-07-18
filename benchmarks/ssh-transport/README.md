@@ -8,6 +8,9 @@ current `ssh_exec` transport inside the WSL-like workstation:
 3. staging a local file by streaming it versus today's remote heredoc, counting
    the local write tool call when the content does not already exist in a file.
 
+It also regression-checks concurrent calls sharing one control path and
+recovery after the OpenSSH control master is killed without cleanup.
+
 Run it from the lab repository root:
 
 ```bash

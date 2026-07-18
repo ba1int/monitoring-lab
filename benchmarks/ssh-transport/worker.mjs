@@ -3,7 +3,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 const HOSTS = (process.env.BENCH_HOSTS ?? [
@@ -23,7 +22,7 @@ const REPEATS = Number(process.env.BENCH_REPEATS ?? 12);
 const FANOUT_CONCURRENCY = Number(process.env.BENCH_FANOUT_CONCURRENCY ?? 4);
 const STAGE_REPEATS = Number(process.env.BENCH_STAGE_REPEATS ?? 5);
 const STAGE_BYTES = Number(process.env.BENCH_STAGE_BYTES ?? 16 * 1024);
-const CACHE_ROOT = join(homedir(), ".cache", "pi", "ssh-benchmark");
+const CONTROL_ROOT = "/tmp";
 
 function validatePositiveInteger(name, value, minimum = 1, maximum = 1000) {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
@@ -117,7 +116,7 @@ function stats(values) {
 }
 
 async function benchmarkMultiplexing() {
-  const directory = join(CACHE_ROOT, `mux-${process.pid}`);
+  const directory = join(CONTROL_ROOT, `pi-ssh-bench-${process.pid}`);
   const controlPath = join(directory, "%C");
   await rm(directory, { recursive: true, force: true });
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -152,6 +151,69 @@ async function benchmarkMultiplexing() {
     median_saved_ms: baselineStats.median_ms - warmStats.median_ms,
     median_saved_percent: savedPercent,
     candidate_pass: savedPercent >= 40 && baselineStats.median_ms - warmStats.median_ms >= 50,
+  };
+}
+
+async function controlCommand(operation, host, controlPath) {
+  return run("ssh", [
+    "-O", operation,
+    "-o", `ControlPath=${controlPath}`,
+    "--", host,
+  ]);
+}
+
+async function benchmarkReuseReliability() {
+  const directory = join(CONTROL_ROOT, `pi-ssh-rel-${process.pid}`);
+  const controlPath = join(directory, "%C");
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+
+  const expected = Array.from({ length: 6 }, (_, index) => `parallel-${index}`);
+  let concurrentPass = false;
+  let staleRecoveryPass = false;
+  let recoveryError = null;
+  let killedMasterPid = null;
+  let recoveryColdMs = null;
+  let recoveryReusedMs = null;
+
+  try {
+    const concurrent = await Promise.all(expected.map((marker) =>
+      sshExec(HOSTS[0], `printf '%s\\n' '${marker}'`, { controlPath })));
+    concurrentPass = concurrent.every((result, index) =>
+      result.exitCode === 0 && result.stdout.toString("utf8").trim() === expected[index]);
+
+    const status = await controlCommand("check", HOSTS[0], controlPath);
+    const statusText = Buffer.concat([status.stdout, status.stderr]).toString("utf8");
+    const match = statusText.match(/pid=(\d+)/);
+    if (!match) throw new Error(`could not identify control master: ${statusText.trim()}`);
+    killedMasterPid = Number(match[1]);
+    process.kill(killedMasterPid, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const recovered = await sshExec(HOSTS[0], "printf 'recovered\\n'", { controlPath });
+    const reused = await sshExec(HOSTS[0], "printf 'reused\\n'", { controlPath });
+    recoveryColdMs = Math.round(recovered.elapsedMs);
+    recoveryReusedMs = Math.round(reused.elapsedMs);
+    staleRecoveryPass = recovered.stdout.toString("utf8").trim() === "recovered"
+      && reused.stdout.toString("utf8").trim() === "reused"
+      && reused.elapsedMs < 200;
+  } catch (error) {
+    recoveryError = error instanceof Error ? error.message : String(error);
+  } finally {
+    await controlCommand("exit", HOSTS[0], controlPath).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
+
+  return {
+    host: HOSTS[0],
+    concurrent_calls: expected.length,
+    concurrent_same_host_pass: concurrentPass,
+    killed_master_pid: killedMasterPid,
+    recovery_cold_ms: recoveryColdMs,
+    recovery_reused_ms: recoveryReusedMs,
+    stale_socket_recovery_pass: staleRecoveryPass,
+    error: recoveryError,
+    regression_pass: concurrentPass && staleRecoveryPass,
   };
 }
 
@@ -295,6 +357,7 @@ const results = {
     stage_repeats: STAGE_REPEATS,
   },
   multiplexing: await benchmarkMultiplexing(),
+  reuse_reliability: await benchmarkReuseReliability(),
   fanout: await benchmarkFanout(),
   staging: await benchmarkStage(),
 };
