@@ -38,6 +38,8 @@ Usage: lab [command]
   lab benchmark incidents [OPTS]  Run the seeded Pi incident benchmark
   lab benchmark remote-dc-onboarding [OPTS]
                                    Score cross-host change execution
+  lab benchmark ssh-transport [--json]
+                                   Measure proposed SSH transport changes
   lab down                         Stop containers but retain lab state
   lab reset [--yes]                Delete containers, volumes, keys, and state
   lab help                         Show this help
@@ -571,7 +573,7 @@ shell_service() {
 run_benchmark() {
     local suite
     suite="${1:-}"
-    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|remote-dc-onboarding} [OPTIONS]"
+    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|remote-dc-onboarding|ssh-transport} [OPTIONS]"
     shift || true
     require_stack
     need node
@@ -588,6 +590,10 @@ run_benchmark() {
             REMOTE_DC_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
             REMOTE_DC_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
                 node "$LAB_ROOT/benchmarks/remote-dc-onboarding/run.mjs" "$@"
+            ;;
+        ssh-transport)
+            SSH_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
+                node "$LAB_ROOT/benchmarks/ssh-transport/run.mjs" "$@"
             ;;
         *)
             die "unknown benchmark suite '$suite'"
