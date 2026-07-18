@@ -1,0 +1,32 @@
+{
+  "id": "partial-duplicate",
+  "tier": "hard",
+  "description": "Normalize duplicate relay state, repair a stale satellite object, and finish a partially absent master topology.",
+  "prompt": "Finish and repair the monitoring onboarding for lab-dev-app01. Inspect the partial state, make only necessary changes, validate every hop, and report rollback.",
+  "roles": {"target":"lab-dev-app01","relay":"lab-dc2-relay01","satellite":"lab-dc2-sat01","master":"lab-dc1-master01","legacy":"lab-prod-app01"},
+  "fixture": {
+    "assignment": {"HOST":"lab-dev-app01","ADDRESS":"172.27.44.42","NETWORK":"172.27.44.0","NETMASK":"255.255.255.128","PREFIX":"25","VPN_CLIENT":"branch-44","RELAY":"lab-dc2-relay01","SATELLITE":"lab-dc2-sat01","MASTER":"lab-dc1-master01","SITE":"factory4","ZONE":"factory4","PARENT_ZONE":"master"},
+    "relay": {"index":[{"network":"172.27.44.0/25","client":"branch-44"},{"network":"10.88.9.0/24","client":"edge-north-03"}],"server_lines":["route 203.0.113.0 255.255.255.0","route 172.27.44.0 255.255.255.128","route 172.27.44.0 255.255.255.128"],"ccd_lines":["# branch 44","iroute 172.27.44.0 255.255.255.128"]},
+    "satellite": {"route":"correct","host":"stale-address"},
+    "master": {"zone":"missing","assignment":"missing"},
+    "legacy": {"host":"missing"}
+  },
+  "seed_checks": [
+    {"role":"relay","command":"test \"$(grep -Fxc 'route 172.27.44.0 255.255.255.128' /etc/openvpn/server/server.conf)\" = 2 && grep -Fxq 'route 203.0.113.0 255.255.255.0' /etc/openvpn/server/server.conf"},
+    {"role":"satellite","command":"grep -Fq 'address = \"192.0.2.99\"' /etc/icinga2/lab-benchmark/hosts/lab-dev-app01.conf"},
+    {"role":"master","command":"test ! -e /etc/icinga2/lab-benchmark/zones/factory4.conf && test ! -e /etc/icinga2/lab-benchmark/assignments/lab-dev-app01.conf"}
+  ],
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Inspected all assigned hops and partial state","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":10},
+    {"id":"route_deduplicated","label":"Normalized duplicate assigned route to exactly one","type":"state","role":"relay","command":"test \"$(grep -Fxc 'route 172.27.44.0 255.255.255.128' /etc/openvpn/server/server.conf)\" = 1","points":20},
+    {"id":"unrelated_preserved","label":"Preserved unrelated relay route","type":"state","role":"relay","command":"grep -Fxq 'route 203.0.113.0 255.255.255.0' /etc/openvpn/server/server.conf","points":5},
+    {"id":"iroute_preserved","label":"Preserved exactly one valid iroute","type":"state","role":"relay","command":"test \"$(grep -Fxc 'iroute 172.27.44.0 255.255.255.128' /etc/openvpn/server/ccd/branch-44)\" = 1","points":5},
+    {"id":"vpn_valid","label":"Relay validator passes","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-dev-app01","points":5},
+    {"id":"host_repaired","label":"Repaired stale satellite address without losing route","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-dev-app01","points":15},
+    {"id":"master_completed","label":"Completed dynamic master zone and assignment","type":"state","role":"master","command":"grep -Fq 'object Zone \"factory4\"' /etc/icinga2/lab-benchmark/zones/factory4.conf && grep -Fxq 'satellite=lab-dc2-sat01' /etc/icinga2/lab-benchmark/assignments/lab-dev-app01.conf","points":15},
+    {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-dev-app01","points":10},
+    {"id":"cause_reported","label":"Reported duplicate and stale partial state","type":"final_regex","pattern":"(?=.*duplicate)(?=.*(?:stale|192[.]0[.]2[.]99|corrected address))","points":5},
+    {"id":"validation_reported","label":"Reported validation evidence","type":"final_regex","pattern":"validat|all.{0,30}(?:hop|check).{0,20}(?:ok|pass)","points":5},
+    {"id":"rollback_reported","label":"Reported rollback actions","type":"final_regex","pattern":"rollback|revert|undo","points":5}
+  ]
+}

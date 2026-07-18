@@ -1,48 +1,65 @@
 ---
 name: lab-host-onboarding
-description: Onboard or repair a remote-datacenter host through its OpenVPN relay, Icinga satellite, and Icinga master. Use for lab host wiring, missing VPN route or iroute directives, incorrect satellite assignments, and cross-host Icinga topology reconciliation.
+description: Onboard, repair, or safely stop remote-datacenter monitoring integrations across an OpenVPN relay, Icinga satellite, and Icinga master. Use for new host wiring, route or iroute defects, partial configuration, topology reconciliation, ownership conflicts, and validation-driven rollback.
 ---
 
 # Lab Host Onboarding
 
-Wire the assigned target through this fixed lab topology:
-
-`target in dc2 -> lab-dc2-relay01 -> lab-dc2-sat01 -> lab-dc1-master01`
-
-This lab models configuration control-plane work. Its validators check OpenVPN and Icinga semantics without requiring privileged TUN devices.
+Follow the assignment and live state; no host, network, site, or zone value is fixed.
 
 ## Source of truth
 
-Read `/etc/lab-onboarding/assignment.env` on the target first. It defines `HOST`, `ADDRESS`, `NETWORK`, `NETMASK`, `VPN_CLIENT`, `RELAY`, `SATELLITE`, and `MASTER`. Do not guess or substitute inventory values.
+Read `/etc/lab-onboarding/assignment.env` on the requested target first. It defines:
 
-Only change the relay, assigned satellite, master, and—when correcting an old assignment—the legacy satellite named by existing master state. Never edit the target.
+`HOST ADDRESS NETWORK NETMASK PREFIX VPN_CLIENT RELAY SATELLITE MASTER SITE ZONE PARENT_ZONE`
 
-## Procedure
+Treat those values as data, not defaults. Inspect every named hop before mutation. Never modify the target.
 
-1. Inspect the assignment and current state on every named hop before changing anything.
-2. On the relay, search `/etc/openvpn/server/ccd/index.tsv` for the assigned network. Stop without changes if another VPN client owns it.
-3. Ensure exactly one `route NETWORK NETMASK` in `/etc/openvpn/server/server.conf`.
-4. Ensure exactly one `iroute NETWORK NETMASK` in `/etc/openvpn/server/ccd/VPN_CLIENT`.
-5. Run `sudo /opt/lab-onboarding/bin/validate-vpn HOST` on the relay.
-6. On the assigned satellite, ensure `/etc/lab-routing/NETWORK-dash-PREFIX.route` contains `network=NETWORK/PREFIX` and `via=RELAY`.
-7. Ensure `/etc/icinga2/lab-benchmark/hosts/HOST.conf` on that satellite is exactly a Host object with `address`, `vars.site = "dc2"`, and `vars.relay` from the assignment.
-8. If the master assignment names a different satellite, remove that host's obsolete object from the old satellite only after confirming it is the same host.
-9. Run `sudo /opt/lab-onboarding/bin/validate-satellite HOST` on the assigned satellite.
-10. On the master, ensure `/etc/icinga2/lab-benchmark/zones/dc2.conf` defines endpoint `lab-dc2-sat01` and zone `dc2` with parent `master`.
-11. Ensure `/etc/icinga2/lab-benchmark/assignments/HOST.conf` contains `host=HOST`, `zone=dc2`, and `satellite=SATELLITE` from the assignment.
-12. Run `sudo /opt/lab-onboarding/bin/validate-master HOST` on the master.
-13. Re-run all three validators. Report changed hosts/files, validation results, and exact rollback actions.
+## Safety contract
 
-Use `sudo` non-interactively for these fixture-owned paths. Make minimal idempotent edits: preserve unrelated content, avoid duplicate directives, and do not restart services when validators are sufficient. If a validator fails, investigate and repair the relevant hop instead of declaring success.
+1. On `RELAY`, check `/etc/openvpn/server/ccd/index.tsv` for `NETWORK/PREFIX`.
+2. If that network belongs to any client other than `VPN_CLIENT`, stop without changes and report the conflict.
+3. Snapshot every file you may change so the exact prior state—including absence—can be restored.
+4. Change only the relay, assigned satellite, master, and a confirmed legacy satellite object for `HOST`.
+5. If any validator fails, investigate once. If the failure is not a configuration defect you can safely resolve, roll back all changes from this task and report the block.
 
-## Exact Icinga host object
+## Desired state
+
+On `RELAY`:
+
+- exactly one `route NETWORK NETMASK` in `/etc/openvpn/server/server.conf`;
+- exactly one `iroute NETWORK NETMASK` in `/etc/openvpn/server/ccd/VPN_CLIENT`;
+- unrelated directives and client ownership entries preserved.
+
+Validate with `sudo /opt/lab-onboarding/bin/validate-vpn HOST`.
+
+On `SATELLITE`:
+
+- `/etc/lab-routing/NETWORK-PREFIX.route` contains exactly `network=NETWORK/PREFIX` and `via=RELAY`;
+- `/etc/icinga2/lab-benchmark/hosts/HOST.conf` contains the exact object below.
 
 ```icinga2
 object Host "HOST" {
   address = "ADDRESS"
-  vars.site = "dc2"
+  vars.site = "SITE"
   vars.relay = "RELAY"
 }
 ```
 
-Replace capitalized fields with assignment values. Convert the mask to a prefix (`255.255.255.0` is `24`) and use `10.77.42.0-24.route` as the route filename for this lab network.
+Validate with `sudo /opt/lab-onboarding/bin/validate-satellite HOST`.
+
+On `MASTER`:
+
+- `/etc/icinga2/lab-benchmark/zones/ZONE.conf` defines endpoint `SATELLITE`;
+- zone `ZONE` uses that endpoint and `parent = "PARENT_ZONE"`;
+- `/etc/icinga2/lab-benchmark/assignments/HOST.conf` contains `host=HOST`, `zone=ZONE`, and `satellite=SATELLITE`.
+
+If the existing master assignment names another satellite, confirm its object is for the same `HOST`, then remove only that obsolete object.
+
+Validate with `sudo /opt/lab-onboarding/bin/validate-master HOST`.
+
+## Execution
+
+Normalize duplicates instead of appending blindly. Preserve unrelated content and permissions. Do not restart services when the supplied validators are sufficient.
+
+After changes, rerun all three validators. Report diagnosis, changed hosts and files, validation evidence, and exact rollback actions. A blocked task is a valid outcome; unvalidated partial state is not.

@@ -2,15 +2,19 @@
 set -Eeuo pipefail
 source /opt/lab-onboarding/expected.env
 [[ "${1:-}" == "$HOST" ]]
-zone_file=/etc/icinga2/lab-benchmark/zones/dc2.conf
+zone_file="/etc/icinga2/lab-benchmark/zones/${ZONE}.conf"
 assignment_file="/etc/icinga2/lab-benchmark/assignments/${HOST}.conf"
 diff -u <(cat <<EOF
 object Endpoint "$SATELLITE" {}
-object Zone "dc2" {
+object Zone "$ZONE" {
   endpoints = [ "$SATELLITE" ]
-  parent = "master"
+  parent = "$PARENT_ZONE"
 }
 EOF
 ) "$zone_file"
-diff -u <(printf 'host=%s\nzone=dc2\nsatellite=%s\n' "$HOST" "$SATELLITE") "$assignment_file"
+diff -u <(printf 'host=%s\nzone=%s\nsatellite=%s\n' "$HOST" "$ZONE" "$SATELLITE") "$assignment_file"
+if [[ -s /opt/lab-onboarding/validator-fault ]]; then
+  cat /opt/lab-onboarding/validator-fault >&2
+  exit 42
+fi
 printf 'master validation: ok (%s -> %s)\n' "$HOST" "$SATELLITE"

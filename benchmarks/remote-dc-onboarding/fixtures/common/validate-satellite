@@ -8,9 +8,9 @@ diff -u <(printf 'network=%s/%s\nvia=%s\n' "$NETWORK" "$PREFIX" "$RELAY") "$rout
 diff -u <(cat <<EOF
 object Host "$HOST" {
   address = "$ADDRESS"
-  vars.site = "dc2"
+  vars.site = "$SITE"
   vars.relay = "$RELAY"
 }
 EOF
 ) "$host_file"
-printf 'satellite validation: ok (%s in dc2)\n' "$HOST"
+printf 'satellite validation: ok (%s in %s)\n' "$HOST" "$SITE"

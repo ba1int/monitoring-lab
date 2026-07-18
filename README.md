@@ -138,6 +138,15 @@ a dc2 target is wired through an OpenVPN relay and Icinga satellite to the dc1
 master. The suite has four fixtures: full onboarding, a missing client
 `iroute`, a missing server `route`, and a stale satellite assignment.
 
+The first four cases are calibration scenarios with stable dc2 values. Four
+hard-tier cases remove that advantage: an unfamiliar `/23` and zone, a
+conflicting VPN owner that requires a safe stop, duplicated partial state, and
+a downstream trust failure that requires exact rollback.
+
+The onboarding skill contains only the generic procedure. Hostnames, networks,
+prefixes, clients, sites, and zones come from each target's assignment and are
+not fixed in agent-visible instructions.
+
 The OpenVPN fixture validates control-plane semantics without giving containers
 privileged TUN devices. Pi works over normal SSH with passwordless `sudo`, just
 as it would follow a work runbook on WSL. Scenario truth stays on the Docker
@@ -155,6 +164,15 @@ lab benchmark remote-dc-onboarding --cases missing-iroute
 lab benchmark remote-dc-onboarding --thinking high --run-id high
 lab benchmark remote-dc-onboarding --thinking xhigh --run-id xhigh
 lab benchmark remote-dc-onboarding --rescore high
+```
+
+Run only the generalization tier with:
+
+```sh
+HARD_CASES=generalized-full,ownership-conflict,partial-duplicate,validator-rollback
+lab benchmark remote-dc-onboarding --cases "$HARD_CASES" --thinking high --run-id hard-high
+lab benchmark remote-dc-onboarding --cases "$HARD_CASES" --thinking medium --run-id hard-medium
+lab benchmark remote-dc-onboarding --cases "$HARD_CASES" --thinking low --run-id hard-low
 ```
 
 `--rescore` re-evaluates report wording and tool-use checkpoints from saved
