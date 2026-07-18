@@ -275,6 +275,7 @@ async function runScenario({ directory, manifest }, context) {
       "exec", "-w", "/home/operator",
       "-e", "PI_SKIP_VERSION_CHECK=1",
       "-e", "PI_TELEMETRY=0",
+      "-e", "PI_THINKING_ROUTER=off",
       workstation,
       "/usr/bin/timeout", "--signal=TERM", "--kill-after=5",
       `${options.timeoutSeconds}s`,

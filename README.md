@@ -19,6 +19,7 @@ The workstation contains:
 - the mounted Protocol Ink dotfiles for shell, Neovim, and Zellij;
 - Pi pinned by the mounted `pi-tools` repository;
 - the repository-owned stateless `ssh_exec` tool;
+- the repository-owned zero-token low/high thinking router;
 - the generic `incident-investigation` reasoning skill; and
 - the lab-only `lab-middleware-health` and `lab-host-onboarding` test skills.
 
@@ -30,6 +31,12 @@ runbooks, task/checkpoint state, permission packages, reviewer agents, `hop`,
 lab-prod-app01” or describe a multi-host task normally; Pi needs no `/ssh`
 command, active-host mode, or picker. Output is bounded before it enters model
 context.
+
+Interactive Pi routes bounded runbook execution to `low` and open-ended
+incidents or runbook engineering to `high`. It escalates from low to high on
+SSH transport errors and timeouts, or when a remote checkpoint fails after a
+mutation. Benchmark subprocesses disable this router so explicit `--thinking`
+comparisons remain controlled.
 
 ## Architecture
 

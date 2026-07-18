@@ -12,7 +12,7 @@ USERLAND      Ubuntu 24.04 LTS
 SHELL         Bash 5.2 (login shell)
 DOTFILES      /opt/dotfiles (read-only source)
 DIRECT SSH    ssh lab-prod-app01
-AGENT         pi  (owned ssh-direct tool; /login once)
+AGENT         pi  (ssh-direct + auto low/high thinking; /login once)
 LAB SKILLS    lab-middleware-health, lab-host-onboarding
 INVENTORY     /opt/monitoring-lab/inventory/hosts.tsv
 

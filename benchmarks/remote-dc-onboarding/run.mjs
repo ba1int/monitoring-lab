@@ -593,7 +593,10 @@ async function runScenario({ manifest }, context) {
     await verifySeed(manifest, containers);
 
     const args = [
-      "exec", "-w", "/home/operator", "-e", "PI_SKIP_VERSION_CHECK=1", "-e", "PI_TELEMETRY=0",
+      "exec", "-w", "/home/operator",
+      "-e", "PI_SKIP_VERSION_CHECK=1",
+      "-e", "PI_TELEMETRY=0",
+      "-e", "PI_THINKING_ROUTER=off",
       workstation, "/usr/bin/timeout", "--signal=TERM", "--kill-after=5", `${options.timeoutSeconds}s`,
       "/home/operator/.local/bin/pi", "--mode", "json", "--no-approve", "--thinking", options.thinking,
       "--session-dir", `${sessionRoot}/sessions`, "--name", `remote-dc-${manifest.id}`,

@@ -619,6 +619,9 @@ verify_lab() {
         test -L "$HOME/.pi/agent/extensions/ssh-direct"
         test "$(readlink "$HOME/.pi/agent/extensions/ssh-direct")" = \
             /opt/pi-tools/extensions/ssh-direct
+        test -L "$HOME/.pi/agent/extensions/thinking-router"
+        test "$(readlink "$HOME/.pi/agent/extensions/thinking-router")" = \
+            /opt/pi-tools/extensions/thinking-router
         test -L "$HOME/.pi/agent/skills/incident-investigation"
         test "$(readlink "$HOME/.pi/agent/skills/incident-investigation")" = \
             /opt/pi-tools/skills/incident-investigation
