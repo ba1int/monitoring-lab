@@ -111,12 +111,22 @@ workstation container or exposed to Pi.
 
 The report records root-cause evidence, unsafe or mutating behavior, SSH call
 count, elapsed time, and model cost. Results are written beneath
-`$MONITORING_LAB_STATE/benchmarks/incidents`. Useful focused runs include:
+`$MONITORING_LAB_STATE/benchmarks/incidents`. The suite covers hidden bytes,
+permissions, configuration precedence, environment and protocol mismatches,
+wrong endpoints, and stale evidence. Useful focused and comparative runs
+include:
 
 ```sh
 lab benchmark incidents --cases hidden-cr
 lab benchmark incidents --limit 1 --thinking high
+lab benchmark incidents --fixtures-only
+lab benchmark incidents --thinking high --run-id high
+lab benchmark incidents --thinking xhigh --run-id xhigh
 ```
+
+`high` is the intentional routine default. Treat `xhigh` as a candidate to
+benchmark against the same cases, not an automatic upgrade: additional
+reasoning is useful only when it produces a measurable correctness gain.
 
 ## Monitoring endpoints
 

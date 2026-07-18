@@ -33,6 +33,7 @@ Usage: node run.mjs [options]
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
   --static-only           Validate fixtures without Docker or model calls
+  --fixtures-only         Inject, verify, and clean fixtures without model calls
   --help                  Show this help
 `);
 }
@@ -47,6 +48,7 @@ function parseArgs(argv) {
     outputRoot: DEFAULT_OUTPUT_ROOT,
     runId: null,
     staticOnly: false,
+    fixturesOnly: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -81,6 +83,9 @@ function parseArgs(argv) {
       case "--static-only":
         options.staticOnly = true;
         break;
+      case "--fixtures-only":
+        options.fixturesOnly = true;
+        break;
       case "--help":
       case "-h":
         usage();
@@ -100,6 +105,9 @@ function parseArgs(argv) {
   }
   if (options.runId && !/^[a-zA-Z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, digits, dot, underscore, and dash");
+  }
+  if (options.staticOnly && options.fixturesOnly) {
+    throw new Error("--static-only and --fixtures-only are mutually exclusive");
   }
   return options;
 }
@@ -177,6 +185,14 @@ async function execScript(container, script, context) {
   );
   await requireSuccess(result, context);
   return result;
+}
+
+async function verifyCleanBaseline(container, context) {
+  await execScript(container, `
+[[ "$(cat /state/status)" == "ok" ]]
+[[ ! -e /etc/lab-middleware ]]
+[[ ! -e /var/log/lab-middleware ]]
+`, context);
 }
 
 function parseSession(text) {
@@ -296,8 +312,12 @@ async function runScenario({ directory, manifest }, context) {
     );
     fixtureUnchanged = verifyResult.code === 0;
   } finally {
-    await execScript(target, cleanup, `${manifest.id}: cleanup`);
-    await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+    try {
+      await execScript(target, cleanup, `${manifest.id}: cleanup`);
+      await verifyCleanBaseline(target, `${manifest.id}: verify cleanup`);
+    } finally {
+      await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+    }
   }
 
   const elapsedMs = Date.now() - startedAt;
@@ -313,12 +333,28 @@ async function runScenario({ directory, manifest }, context) {
     thinking: options.thinking,
     elapsed_ms: elapsedMs,
     pi_exit: piResult?.code ?? null,
+    fixture_unchanged: fixtureUnchanged,
     usage: session.usage,
     scoring,
     final_text: session.finalText,
   };
   await writeFile(join(caseDirectory, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
   return record;
+}
+
+async function verifyFixture({ directory, manifest }) {
+  const target = await containerId(manifest.host);
+  const inject = await readFile(join(directory, "inject.sh"), "utf8");
+  const verify = await readFile(join(directory, "verify.sh"), "utf8");
+  const cleanup = await readFile(join(directory, "cleanup.sh"), "utf8");
+  try {
+    await verifyCleanBaseline(target, `${manifest.id}: require clean baseline`);
+    await execScript(target, inject, `${manifest.id}: inject`);
+    await execScript(target, verify, `${manifest.id}: verify injection`);
+  } finally {
+    await execScript(target, cleanup, `${manifest.id}: cleanup`);
+    await verifyCleanBaseline(target, `${manifest.id}: verify cleanup`);
+  }
 }
 
 function renderReport(runId, records) {
@@ -369,6 +405,13 @@ async function main() {
 
   const records = [];
   try {
+    if (options.fixturesOnly) {
+      for (const scenario of scenarios) {
+        await verifyFixture(scenario);
+        process.stdout.write(`fixture  ${scenario.manifest.id}: PASS\n`);
+      }
+      return;
+    }
     const workstation = await containerId("workstation");
     await mkdir(outputDirectory, { recursive: true });
     for (const scenario of scenarios) {
@@ -388,6 +431,7 @@ async function main() {
           description: scenario.manifest.description,
           host: scenario.manifest.host,
           elapsed_ms: null,
+          fixture_unchanged: null,
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 },
           scoring: {
             pass: false, completed: false, rootCause: false, readOnly: false,

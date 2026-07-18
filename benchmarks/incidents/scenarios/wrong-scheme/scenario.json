@@ -1,0 +1,23 @@
+{
+  "id": "wrong-scheme",
+  "description": "The dependency is healthy over HTTP, but middleware attempts TLS on the same port.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "setting", "any": ["UPSTREAM_SCHEME"] },
+      { "id": "configured-scheme", "any": ["https"] },
+      { "id": "working-scheme", "any": ["http"] },
+      { "id": "mechanism", "any": ["wrong[ _]version[ _]number", "TLS.*plain HTTP", "plain HTTP.*TLS", "protocol mismatch"] },
+      { "id": "endpoint", "any": ["8080"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 7,
+    "max_cost_usd": 0.5,
+    "max_elapsed_seconds": 360
+  }
+}

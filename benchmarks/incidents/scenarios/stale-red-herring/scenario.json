@@ -1,0 +1,24 @@
+{
+  "id": "stale-red-herring",
+  "description": "An old DNS error distracts from the current bad health-check path.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "setting", "any": ["HEALTH_PATH"] },
+      { "id": "bad-path", "any": ["/status"] },
+      { "id": "good-path", "any": ["/health"] },
+      { "id": "current-mechanism", "any": ["404", "not found"] },
+      { "id": "recency", "any": ["stale", "older", "earlier", "red herring", "newer", "latest", "currently"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|fix|edit|replace).{0,60}(?:DNS|hosts file|UPSTREAM_HOST)",
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 7,
+    "max_cost_usd": 0.5,
+    "max_elapsed_seconds": 360
+  }
+}

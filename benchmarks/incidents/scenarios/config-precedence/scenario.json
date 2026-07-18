@@ -1,0 +1,23 @@
+{
+  "id": "config-precedence",
+  "description": "A later drop-in silently overrides the correct base dependency port.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "override-file", "any": ["override\\.env"] },
+      { "id": "setting", "any": ["UPSTREAM_PORT"] },
+      { "id": "effective-value", "any": ["8081"] },
+      { "id": "precedence", "any": ["last(?: value)? wins", "precedence", "override"] },
+      { "id": "intended-value", "any": ["8080"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 7,
+    "max_cost_usd": 0.5,
+    "max_elapsed_seconds": 360
+  }
+}

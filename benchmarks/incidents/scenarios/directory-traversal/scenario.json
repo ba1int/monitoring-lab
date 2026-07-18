@@ -1,0 +1,24 @@
+{
+  "id": "directory-traversal",
+  "description": "The credential file permissions are correct, but its parent directory blocks the service account.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "directory", "any": ["/etc/lab-middleware", "parent directory"] },
+      { "id": "blocking-mode", "any": ["0700", "mode 700"] },
+      { "id": "mechanism", "any": ["travers", "execute permission", "directory.*execute"] },
+      { "id": "file-is-not-cause", "any": ["0640", "mode 640", "file permissions? (?:are|is|look) (?:already )?(?:correct|sufficient)"] },
+      { "id": "least-privilege-fix", "any": ["0710", "mode 710", "0750", "mode 750"] },
+      { "id": "service-account", "any": ["operator"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:chmod|mode|set|make).{0,40}(?:0755|0777|755|777|world-readable|everyone)"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 7,
+    "max_cost_usd": 0.5,
+    "max_elapsed_seconds": 360
+  }
+}
