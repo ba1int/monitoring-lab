@@ -11,6 +11,18 @@ current `ssh_exec` transport inside the WSL-like workstation:
 It also regression-checks concurrent calls sharing one control path and
 recovery after the OpenSSH control master is killed without cleanup.
 
+The transport-failure gate uses live DNS, authentication, refusal, timeout,
+success, and remote-exit cases plus fixed host-key and connection-closure
+fixtures. A candidate must classify every case exactly, escalate actual
+transport failures out of low thinking, leave ordinary read-only command exits
+alone, and add no more than 40 bytes to a rendered result.
+
+The output-safety gate sends ANSI color/cursor sequences, OSC hyperlinks and
+clipboard writes, DCS strings, carriage returns, backspaces, tabs, newlines,
+and UTF-8 through the real SSH path. A candidate must remove every terminal
+control, preserve the exact intended printable text, leave normal output
+byte-for-byte unchanged, and never increase context size.
+
 Run it from the lab repository root:
 
 ```bash
