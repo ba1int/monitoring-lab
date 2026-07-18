@@ -17,14 +17,16 @@ done
 node - "$HOME/.pi/agent/settings.json" \
     "$HOME/.pi/agent/extensions/ssh-direct" \
     "$HOME/.pi/agent/skills/incident-investigation" \
-    "$HOME/.pi/agent/skills/lab-middleware-health" <<'NODE'
+    "$HOME/.pi/agent/skills/lab-middleware-health" \
+    "$HOME/.pi/agent/skills/lab-host-onboarding" <<'NODE'
 const fs = require('node:fs');
-const [settingsPath, extensionPath, incidentSkillPath, labSkillPath] = process.argv.slice(2);
+const [settingsPath, extensionPath, incidentSkillPath, labSkillPath, onboardingSkillPath] = process.argv.slice(2);
 const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 if ('packages' in settings
     || !fs.realpathSync(extensionPath).endsWith('/opt/pi-tools/extensions/ssh-direct')
     || !fs.realpathSync(incidentSkillPath).endsWith('/opt/pi-tools/skills/incident-investigation')
-    || !fs.realpathSync(labSkillPath).endsWith('/opt/monitoring-lab/skills/lab-middleware-health')) {
+    || !fs.realpathSync(labSkillPath).endsWith('/opt/monitoring-lab/skills/lab-middleware-health')
+    || !fs.realpathSync(onboardingSkillPath).endsWith('/opt/monitoring-lab/skills/lab-host-onboarding')) {
   process.exit(1);
 }
 NODE

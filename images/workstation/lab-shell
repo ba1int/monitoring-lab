@@ -13,7 +13,7 @@ SHELL         Bash 5.2 (login shell)
 DOTFILES      /opt/dotfiles (read-only source)
 DIRECT SSH    ssh lab-prod-app01
 AGENT         pi  (owned ssh-direct tool; /login once)
-LAB SKILL     lab-middleware-health
+LAB SKILLS    lab-middleware-health, lab-host-onboarding
 INVENTORY     /opt/monitoring-lab/inventory/hosts.tsv
 
 This home directory belongs only to the lab. Exit Zellij to return to your host shell.

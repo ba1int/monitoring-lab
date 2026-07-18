@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lab Host Onboarding"
+  short_description: "Wire remote-datacenter hosts into Icinga"
+  default_prompt: "Use $lab-host-onboarding to onboard a remote-datacenter host through its VPN relay, satellite, and Icinga master."

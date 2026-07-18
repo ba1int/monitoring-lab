@@ -9,6 +9,7 @@ RUN apt-get update \
         openssh-server \
         passwd \
         python3 \
+        sudo \
         tini \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
@@ -24,6 +25,10 @@ RUN useradd \
     && install -d -o root -g root -m 0755 /run/sshd /run/lab-ssh \
     && install -d -o operator -g operator -m 0750 /state \
     && install -d -o root -g root -m 0755 /usr/local/libexec \
+    && printf '%s\n' 'operator ALL=(root) NOPASSWD: ALL' \
+        > /etc/sudoers.d/90-monitoring-lab-operator \
+    && chmod 0440 /etc/sudoers.d/90-monitoring-lab-operator \
+    && visudo -c \
     && rm -f /etc/ssh/ssh_host_*
 
 COPY lab-entrypoint /usr/local/sbin/lab-entrypoint

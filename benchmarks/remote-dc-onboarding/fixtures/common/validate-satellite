@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source /opt/lab-onboarding/expected.env
+[[ "${1:-}" == "$HOST" ]]
+route_file="/etc/lab-routing/${NETWORK}-${PREFIX}.route"
+host_file="/etc/icinga2/lab-benchmark/hosts/${HOST}.conf"
+diff -u <(printf 'network=%s/%s\nvia=%s\n' "$NETWORK" "$PREFIX" "$RELAY") "$route_file"
+diff -u <(cat <<EOF
+object Host "$HOST" {
+  address = "$ADDRESS"
+  vars.site = "dc2"
+  vars.relay = "$RELAY"
+}
+EOF
+) "$host_file"
+printf 'satellite validation: ok (%s in dc2)\n' "$HOST"

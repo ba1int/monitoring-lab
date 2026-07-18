@@ -3,6 +3,9 @@ lab-prod-app01	PROD	middleware	dc1
 lab-prod-app02	PROD	middleware	dc2
 lab-prod-web01	PROD	web	dc1
 lab-prod-mq01	PROD	messaging	dc1
+lab-dc2-relay01	PROD	vpn-relay	dc2
+lab-dc2-sat01	PROD	monitoring-satellite	dc2
+lab-dc1-master01	PROD	monitoring-master	dc1
 lab-test-app01	TEST	middleware	lab
 lab-test-web01	TEST	web	lab
 lab-test-mq01	TEST	messaging	lab

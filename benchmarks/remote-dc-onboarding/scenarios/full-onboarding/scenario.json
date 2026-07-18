@@ -1,0 +1,26 @@
+{
+  "id": "full-onboarding",
+  "description": "Onboard a new dc2 middleware host across an empty relay, satellite, and master control plane.",
+  "prompt": "Onboard lab-prod-app02 into Icinga through its assigned remote-datacenter topology. Perform the work, validate every hop, and report changes plus rollback.",
+  "roles": {
+    "target": "lab-prod-app02",
+    "relay": "lab-dc2-relay01",
+    "satellite": "lab-dc2-sat01",
+    "master": "lab-dc1-master01",
+    "legacy": "lab-prod-app01"
+  },
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Inspected target, relay, satellite, and master","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":15},
+    {"id":"server_route","label":"Installed exactly one OpenVPN server route","type":"state","role":"relay","command":"test \"$(grep -Fxc -- 'route 10.77.42.0 255.255.255.0' /etc/openvpn/server/server.conf)\" = 1","points":10},
+    {"id":"client_iroute","label":"Installed exactly one client iroute","type":"state","role":"relay","command":"test \"$(grep -Fxc -- 'iroute 10.77.42.0 255.255.255.0' /etc/openvpn/server/ccd/dc2-relay01)\" = 1","points":10},
+    {"id":"vpn_valid","label":"Relay validator passes","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-prod-app02","points":5},
+    {"id":"satellite_route","label":"Installed satellite route","type":"state","role":"satellite","command":"grep -Fxq 'network=10.77.42.0/24' /etc/lab-routing/10.77.42.0-24.route && grep -Fxq 'via=lab-dc2-relay01' /etc/lab-routing/10.77.42.0-24.route","points":10},
+    {"id":"satellite_host","label":"Installed host object on assigned satellite","type":"state","role":"satellite","command":"grep -Fq 'object Host \"lab-prod-app02\"' /etc/icinga2/lab-benchmark/hosts/lab-prod-app02.conf && grep -Fq 'address = \"10.77.42.15\"' /etc/icinga2/lab-benchmark/hosts/lab-prod-app02.conf && grep -Fq 'vars.relay = \"lab-dc2-relay01\"' /etc/icinga2/lab-benchmark/hosts/lab-prod-app02.conf","points":10},
+    {"id":"satellite_valid","label":"Satellite validator passes","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-prod-app02","points":5},
+    {"id":"zone","label":"Installed dc2 endpoint and zone","type":"state","role":"master","command":"grep -Fq 'object Endpoint \"lab-dc2-sat01\"' /etc/icinga2/lab-benchmark/zones/dc2.conf && grep -Fq 'parent = \"master\"' /etc/icinga2/lab-benchmark/zones/dc2.conf","points":10},
+    {"id":"assignment","label":"Assigned host to dc2 satellite","type":"state","role":"master","command":"grep -Fxq 'satellite=lab-dc2-sat01' /etc/icinga2/lab-benchmark/assignments/lab-prod-app02.conf","points":10},
+    {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-prod-app02","points":5},
+    {"id":"validation_reported","label":"Reported validation evidence","type":"final_regex","pattern":"validat|check.*(pass|ok)|all.*hop","points":5},
+    {"id":"rollback_reported","label":"Reported rollback actions","type":"final_regex","pattern":"rollback|revert|undo","points":5}
+  ]
+}

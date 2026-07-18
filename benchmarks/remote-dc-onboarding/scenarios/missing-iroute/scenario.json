@@ -1,0 +1,18 @@
+{
+  "id": "missing-iroute",
+  "description": "Repair a missing OpenVPN client iroute while preserving the correct server route and Icinga topology.",
+  "prompt": "The dc2 onboarding of lab-prod-app02 is incomplete. Diagnose the cross-host path, repair it, validate every hop, and report changes plus rollback.",
+  "roles": {"target":"lab-prod-app02","relay":"lab-dc2-relay01","satellite":"lab-dc2-sat01","master":"lab-dc1-master01","legacy":"lab-prod-app01"},
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Inspected all four topology hosts","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":10},
+    {"id":"client_iroute","label":"Repaired exactly one client iroute","type":"state","role":"relay","command":"test \"$(grep -Fxc -- 'iroute 10.77.42.0 255.255.255.0' /etc/openvpn/server/ccd/dc2-relay01)\" = 1","points":25},
+    {"id":"server_route_preserved","label":"Preserved the single correct server route","type":"state","role":"relay","command":"test \"$(grep -Fxc -- 'route 10.77.42.0 255.255.255.0' /etc/openvpn/server/server.conf)\" = 1","points":10},
+    {"id":"index_preserved","label":"Preserved VPN client ownership index","type":"state","role":"relay","command":"grep -Fxq $'10.77.42.0/24\tdc2-relay01' /etc/openvpn/server/ccd/index.tsv && test \"$(wc -l < /etc/openvpn/server/ccd/index.tsv)\" = 2","points":5},
+    {"id":"vpn_valid","label":"Relay validator passes","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-prod-app02","points":15},
+    {"id":"satellite_preserved","label":"Satellite remains valid","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-prod-app02","points":10},
+    {"id":"master_preserved","label":"Master remains valid","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-prod-app02","points":10},
+    {"id":"validation_reported","label":"Reported validation evidence","type":"final_regex","pattern":"validat|check.*(pass|ok)|all.*hop","points":5},
+    {"id":"rollback_reported","label":"Reported rollback actions","type":"final_regex","pattern":"rollback|revert|undo","points":5},
+    {"id":"cause_identified","label":"Identified the missing iroute","type":"final_regex","pattern":"missing.{0,40}iroute|iroute.{0,40}missing","points":5}
+  ]
+}

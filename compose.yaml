@@ -16,6 +16,12 @@ x-monitor-dependencies: &monitor-dependencies
     condition: service_healthy
   lab-prod-mq01:
     condition: service_healthy
+  lab-dc2-relay01:
+    condition: service_healthy
+  lab-dc2-sat01:
+    condition: service_healthy
+  lab-dc1-master01:
+    condition: service_healthy
   lab-test-app01:
     condition: service_healthy
   lab-test-web01:
@@ -93,6 +99,42 @@ services:
     volumes:
       - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
       - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-prod-mq01:/state"
+
+  lab-dc2-relay01:
+    <<: *mock-host
+    hostname: lab-dc2-relay01
+    environment:
+      LAB_HOSTNAME: lab-dc2-relay01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: vpn-relay
+      LAB_SITE: dc2
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dc2-relay01:/state"
+
+  lab-dc2-sat01:
+    <<: *mock-host
+    hostname: lab-dc2-sat01
+    environment:
+      LAB_HOSTNAME: lab-dc2-sat01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: monitoring-satellite
+      LAB_SITE: dc2
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dc2-sat01:/state"
+
+  lab-dc1-master01:
+    <<: *mock-host
+    hostname: lab-dc1-master01
+    environment:
+      LAB_HOSTNAME: lab-dc1-master01
+      LAB_ENVIRONMENT: PROD
+      LAB_ROLE: monitoring-master
+      LAB_SITE: dc1
+    volumes:
+      - "${MONITORING_LAB_STATE:-./.state}/ssh/id_ed25519.pub:/run/lab-ssh/authorized_key:ro"
+      - "${MONITORING_LAB_STATE:-./.state}/hosts/lab-dc1-master01:/state"
 
   lab-test-app01:
     <<: *mock-host

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source /opt/lab-onboarding/expected.env
+[[ "${1:-}" == "$HOST" ]]
+[[ "$(grep -Fxc -- "route $NETWORK $NETMASK" /etc/openvpn/server/server.conf)" == 1 ]]
+[[ "$(grep -Fxc -- "iroute $NETWORK $NETMASK" "/etc/openvpn/server/ccd/$VPN_CLIENT")" == 1 ]]
+[[ "$(awk -F '\t' -v n="$NETWORK/$PREFIX" '$1 == n { print $2 }' /etc/openvpn/server/ccd/index.tsv)" == "$VPN_CLIENT" ]]
+printf 'vpn validation: ok (%s via %s)\n' "$NETWORK/$PREFIX" "$VPN_CLIENT"

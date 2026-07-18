@@ -36,6 +36,8 @@ Usage: lab [command]
   lab heal HOST                    Start the host and restore middleware to OK
   lab verify                       Run configuration, SSH, and monitoring checks
   lab benchmark incidents [OPTS]  Run the seeded Pi incident benchmark
+  lab benchmark remote-dc-onboarding [OPTS]
+                                   Score cross-host change execution
   lab down                         Stop containers but retain lab state
   lab reset [--yes]                Delete containers, volumes, keys, and state
   lab help                         Show this help
@@ -569,7 +571,7 @@ shell_service() {
 run_benchmark() {
     local suite
     suite="${1:-}"
-    [[ -n "$suite" ]] || die "usage: lab benchmark incidents [OPTIONS]"
+    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|remote-dc-onboarding} [OPTIONS]"
     shift || true
     require_stack
     need node
@@ -580,6 +582,12 @@ run_benchmark() {
             INCIDENT_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
             INCIDENT_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
                 node "$LAB_ROOT/benchmarks/incidents/run.mjs" "$@"
+            ;;
+        remote-dc-onboarding)
+            REMOTE_DC_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
+            REMOTE_DC_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
+            REMOTE_DC_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
+                node "$LAB_ROOT/benchmarks/remote-dc-onboarding/run.mjs" "$@"
             ;;
         *)
             die "unknown benchmark suite '$suite'"
@@ -621,6 +629,11 @@ verify_lab() {
             /opt/monitoring-lab/skills/lab-middleware-health
         grep -q "^name: lab-middleware-health$" \
             "$HOME/.pi/agent/skills/lab-middleware-health/SKILL.md"
+        test -L "$HOME/.pi/agent/skills/lab-host-onboarding"
+        test "$(readlink "$HOME/.pi/agent/skills/lab-host-onboarding")" = \
+            /opt/monitoring-lab/skills/lab-host-onboarding
+        grep -q "^name: lab-host-onboarding$" \
+            "$HOME/.pi/agent/skills/lab-host-onboarding/SKILL.md"
         jq -e '"'"'has("packages") | not'"'"' "$HOME/.pi/agent/settings.json" >/dev/null
         test ! -e "$HOME/.pi/agent/extensions/protocol-ops"
         for removed_tool in hop peek kb pulse pi-safe; do
@@ -637,7 +650,7 @@ verify_lab() {
             --config-dir "$HOME/.config/zellij" setup --check >/dev/null
     '
 
-    note "checking all ten SSH aliases through the bastion"
+    note "checking every SSH alias through the bastion"
     while IFS=$'\t' read -r host _; do
         [[ "$host" == "name" || -z "$host" ]] && continue
         remote="$(ssh -F "$SSH_CONFIG" "$host" hostname)"

@@ -1,14 +1,15 @@
 # Monitoring lab
 
 An isolated Ubuntu workstation connected to an Icinga 2 master, a Nagios Core
-master, an SSH bastion, and ten disposable mock hosts. Its purpose is to test
+master, an SSH bastion, and thirteen disposable mock hosts. Its purpose is to test
 generic agent tools before they are installed on the work WSL machine.
 
 Work-specific procedures do not belong here. The work machine's skills define
 what must be done and where; this lab validates only transport behavior,
 skill discovery, incident reasoning, execution ergonomics, and context cost. The synthetic
-`lab-middleware-health` skill is a lab fixture that stands in for those work
-skills; it is not installed by `pi-tools` or the workstation dotfiles.
+`lab-middleware-health` and `lab-host-onboarding` skills are lab fixtures that
+stand in for those work skills; neither is installed by `pi-tools` or the
+workstation dotfiles.
 
 ## Workstation baseline
 
@@ -19,7 +20,7 @@ The workstation contains:
 - Pi pinned by the mounted `pi-tools` repository;
 - the repository-owned stateless `ssh_exec` tool;
 - the generic `incident-investigation` reasoning skill; and
-- the lab-only `lab-middleware-health` test skill.
+- the lab-only `lab-middleware-health` and `lab-host-onboarding` test skills.
 
 There are no third-party Pi extensions or packages. Protocol Ops, Tura-derived
 runbooks, task/checkpoint state, permission packages, reviewer agents, `hop`,
@@ -93,6 +94,8 @@ lab heal lab-prod-app01
 lab verify
 lab benchmark incidents --static-only
 lab benchmark incidents
+lab benchmark remote-dc-onboarding --static-only
+lab benchmark remote-dc-onboarding
 lab down
 lab reset --yes
 ```
@@ -127,6 +130,39 @@ lab benchmark incidents --thinking xhigh --run-id xhigh
 `high` is the intentional routine default. Treat `xhigh` as a candidate to
 benchmark against the same cases, not an automatic upgrade: additional
 reasoning is useful only when it produces a measurable correctness gain.
+
+## Remote-datacenter onboarding benchmark
+
+`lab benchmark remote-dc-onboarding` evaluates actual cross-host change work:
+a dc2 target is wired through an OpenVPN relay and Icinga satellite to the dc1
+master. The suite has four fixtures: full onboarding, a missing client
+`iroute`, a missing server `route`, and a stale satellite assignment.
+
+The OpenVPN fixture validates control-plane semantics without giving containers
+privileged TUN devices. Pi works over normal SSH with passwordless `sudo`, just
+as it would follow a work runbook on WSL. Scenario truth stays on the Docker
+host and is not mounted into the workstation.
+
+This is deliberately not pass/fail. Each scenario awards up to 100 points at
+weighted checkpoints for discovery, correct changes, preserved state,
+validation, and rollback reporting. Hard safety flags—out-of-scope hosts,
+dangerous commands, target mutation, or damaged canaries—are shown separately
+and cannot be hidden by a high score.
+
+```sh
+lab benchmark remote-dc-onboarding --fixtures-only
+lab benchmark remote-dc-onboarding --cases missing-iroute
+lab benchmark remote-dc-onboarding --thinking high --run-id high
+lab benchmark remote-dc-onboarding --thinking xhigh --run-id xhigh
+lab benchmark remote-dc-onboarding --rescore high
+```
+
+`--rescore` re-evaluates report wording and tool-use checkpoints from saved
+sessions while retaining the state checks captured before fixture cleanup. It
+does not call a model or pretend to re-check state that no longer exists.
+
+Results are written beneath
+`$MONITORING_LAB_STATE/benchmarks/remote-dc-onboarding`.
 
 ## Monitoring endpoints
 
