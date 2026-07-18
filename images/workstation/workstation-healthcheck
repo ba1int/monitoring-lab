@@ -10,8 +10,21 @@ test -s "$HOME/.local/state/monitoring-lab/workstation-ready"
 test -r "$HOME/.ssh/config"
 test -r "$HOME/.config/nvim/init.vim"
 test -r "$HOME/.config/zellij/config.kdl"
-test -r "$HOME/.local/share/protocol-ops/runtime.sh"
-test -d "$KB_ROOT"
-for tool in bash ssh nvim zellij fzf rg bat hop peek kb pulse; do
+for tool in bash ssh node npm nvim zellij fzf rg bat pi; do
     command -v "$tool" >/dev/null
 done
+
+node - "$HOME/.pi/agent/settings.json" \
+    "$HOME/.pi/agent/extensions/ssh-direct" \
+    "$HOME/.pi/agent/skills/incident-investigation" \
+    "$HOME/.pi/agent/skills/lab-middleware-health" <<'NODE'
+const fs = require('node:fs');
+const [settingsPath, extensionPath, incidentSkillPath, labSkillPath] = process.argv.slice(2);
+const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+if ('packages' in settings
+    || !fs.realpathSync(extensionPath).endsWith('/opt/pi-tools/extensions/ssh-direct')
+    || !fs.realpathSync(incidentSkillPath).endsWith('/opt/pi-tools/skills/incident-investigation')
+    || !fs.realpathSync(labSkillPath).endsWith('/opt/monitoring-lab/skills/lab-middleware-health')) {
+  process.exit(1);
+}
+NODE

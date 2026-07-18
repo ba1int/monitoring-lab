@@ -11,11 +11,9 @@ MONITORING LAB // ISOLATED WORKSTATION
 USERLAND      Ubuntu 24.04 LTS
 SHELL         Bash 5.2 (login shell)
 DOTFILES      /opt/dotfiles (read-only source)
-PICK HOST     hop
-HOST RECORD   peek lab-prod-app01
-CHEATSHEETS   kb
-PROBLEMS      pulse
 DIRECT SSH    ssh lab-prod-app01
+AGENT         pi  (owned ssh-direct tool; /login once)
+LAB SKILL     lab-middleware-health
 INVENTORY     /opt/monitoring-lab/inventory/hosts.tsv
 
 This home directory belongs only to the lab. Exit Zellij to return to your host shell.

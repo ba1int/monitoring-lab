@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lab Middleware Health"
+  short_description: "Inspect mock middleware health efficiently"
+  default_prompt: "Inspect the named lab host and report its middleware health."

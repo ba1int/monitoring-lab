@@ -4,6 +4,8 @@ set -Eeuo pipefail
 umask 077
 
 readonly DOTFILES_ROOT="${MONITORING_LAB_DOTFILES_ROOT:-/opt/dotfiles}"
+readonly PI_TOOLS_ROOT="${MONITORING_LAB_PI_TOOLS_ROOT:-/opt/pi-tools}"
+readonly LAB_SKILLS_ROOT="${MONITORING_LAB_SKILLS_ROOT:-/opt/monitoring-lab/skills}"
 readonly INVENTORY_FILE="${MONITORING_LAB_INVENTORY:-/opt/monitoring-lab/inventory/hosts.tsv}"
 readonly KEY_SOURCE="${MONITORING_LAB_KEY_SOURCE:-/run/secrets/lab_ssh_key}"
 readonly READY_FILE="$HOME/.local/state/monitoring-lab/workstation-ready"
@@ -15,6 +17,31 @@ log() {
 die() {
     log "ERROR: $*"
     exit 1
+}
+
+link_lab_skills() {
+    local skill_source skill_name skill_target
+
+    [[ -d "$LAB_SKILLS_ROOT" ]] \
+        || die "lab skills are not mounted at $LAB_SKILLS_ROOT"
+    mkdir -p "$HOME/.pi/agent/skills"
+
+    for skill_source in "$LAB_SKILLS_ROOT"/*; do
+        [[ -f "$skill_source/SKILL.md" ]] || continue
+        skill_name="$(basename -- "$skill_source")"
+        [[ "$skill_name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+            || die "invalid lab skill name: $skill_name"
+        skill_target="$HOME/.pi/agent/skills/$skill_name"
+
+        if [[ -L "$skill_target" ]] \
+            && [[ "$(readlink "$skill_target")" == "$skill_source" ]]; then
+            continue
+        fi
+        [[ ! -e "$skill_target" && ! -L "$skill_target" ]] \
+            || die "refusing to replace existing skill: $skill_target"
+        ln -s "$skill_source" "$skill_target"
+        log "linked lab skill $skill_name"
+    done
 }
 
 render_ssh_config() {
@@ -70,6 +97,8 @@ EOF
 main() {
     [[ -x "$DOTFILES_ROOT/install-terminal.sh" ]] \
         || die "dotfiles are not mounted at $DOTFILES_ROOT"
+    [[ -x "$PI_TOOLS_ROOT/install.sh" ]] \
+        || die "pi-tools is not mounted at $PI_TOOLS_ROOT"
     [[ -r "$INVENTORY_FILE" ]] \
         || die "inventory is not mounted at $INVENTORY_FILE"
     [[ -s "$KEY_SOURCE" ]] \
@@ -86,10 +115,15 @@ main() {
     render_ssh_config
 
     log "linking the mounted Protocol Ink dotfiles"
-    "$DOTFILES_ROOT/install-terminal.sh" --no-ghostty --with-shell --no-lab
+    "$DOTFILES_ROOT/install-terminal.sh" --no-ghostty --with-shell
 
-    printf 'ubuntu-24.04 bash\n' > "$READY_FILE"
-    log "Ubuntu workstation ready"
+    log "installing Pi with repository-owned tools only"
+    NPM_CONFIG_CACHE=/tmp/npm-cache \
+        "$PI_TOOLS_ROOT/install.sh"
+    link_lab_skills
+
+    printf 'ubuntu-24.04 bash pi owned-tools lab-skills\n' > "$READY_FILE"
+    log "Ubuntu workstation ready with calibrated Pi tools"
     exec "$@"
 }
 

@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TARGETARCH
+ARG NODE_VERSION=22.19.0
 ARG NEOVIM_VERSION=0.12.4
 ARG ZELLIJ_VERSION=0.44.3
 ARG FZF_VERSION=0.72.0
@@ -23,12 +24,15 @@ RUN apt-get update \
         ripgrep \
         tini \
         util-linux \
+        xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/batcat /usr/local/bin/bat
 
 RUN set -eux; \
     case "$TARGETARCH" in \
         amd64) \
+            node_arch='x64'; \
+            node_sha='c0649af18e6a24f6fe5535a3e86b341dd49a8e71117c8b68bde973ef834f16f2'; \
             nvim_arch='x86_64'; \
             nvim_sha='012bf3fcac5ade43914df3f174668bf64d05e049a4f032a388c027b1ebd78628'; \
             zellij_arch='x86_64'; \
@@ -37,6 +41,8 @@ RUN set -eux; \
             fzf_sha='0e58e4bd0b3c5d68c56b54c460a6863d0de79633ed18d388575a960ab447b006'; \
             ;; \
         arm64) \
+            node_arch='arm64'; \
+            node_sha='0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc'; \
             nvim_arch='arm64'; \
             nvim_sha='ceb7e88c6b681f0515d135dcdfad54f5eb4373b25ce6172197cd9a69c758063f'; \
             zellij_arch='aarch64'; \
@@ -49,6 +55,14 @@ RUN set -eux; \
             exit 1; \
             ;; \
     esac; \
+    curl -fsSLo /tmp/node.tar.xz \
+        "https://nodejs.org/download/release/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+    printf '%s  %s\n' "$node_sha" /tmp/node.tar.xz | sha256sum -c -; \
+    install -d /opt/node; \
+    tar -xJf /tmp/node.tar.xz --strip-components=1 -C /opt/node; \
+    for executable in node npm npx corepack; do \
+        ln -s "/opt/node/bin/$executable" "/usr/local/bin/$executable"; \
+    done; \
     curl -fsSLo /tmp/nvim.tar.gz \
         "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-${nvim_arch}.tar.gz"; \
     printf '%s  %s\n' "$nvim_sha" /tmp/nvim.tar.gz | sha256sum -c -; \
@@ -65,7 +79,7 @@ RUN set -eux; \
     printf '%s  %s\n' "$fzf_sha" /tmp/fzf.tar.gz | sha256sum -c -; \
     tar -xzf /tmp/fzf.tar.gz -C /usr/local/bin fzf; \
     chmod 0755 /usr/local/bin/fzf; \
-    rm -f /tmp/nvim.tar.gz /tmp/zellij.tar.gz /tmp/fzf.tar.gz
+    rm -f /tmp/node.tar.xz /tmp/nvim.tar.gz /tmp/zellij.tar.gz /tmp/fzf.tar.gz
 
 RUN set -eux; \
     git clone --filter=blob:none --no-checkout \
@@ -144,7 +158,7 @@ ENV HOME=/home/operator \
 USER operator
 WORKDIR /home/operator
 
-HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=12 \
+HEALTHCHECK --interval=5s --timeout=3s --start-period=120s --retries=12 \
     CMD ["/usr/local/bin/workstation-healthcheck"]
 
 STOPSIGNAL SIGTERM

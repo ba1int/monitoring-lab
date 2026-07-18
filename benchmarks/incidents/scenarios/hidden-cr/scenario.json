@@ -1,0 +1,22 @@
+{
+  "id": "hidden-cr",
+  "description": "A visually plausible upstream hostname contains a hidden carriage return.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "setting", "any": ["UPSTREAM_HOST"] },
+      { "id": "hidden-byte", "any": ["carriage[ -]?return", "CRLF", "\\\\r"] },
+      { "id": "failure-mechanism", "any": ["DNS", "resolv", "name or service not known"] },
+      { "id": "causal-location", "any": ["trailing", "line ending", "hidden (?:byte|character)"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 6,
+    "max_cost_usd": 0.25,
+    "max_elapsed_seconds": 240
+  }
+}

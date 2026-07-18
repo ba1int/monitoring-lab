@@ -17,6 +17,7 @@ COLIMA_PROFILE="${MONITORING_LAB_COLIMA_PROFILE:-monitoring-lab}"
 LAB_DOCKER_CONTEXT="${MONITORING_LAB_DOCKER_CONTEXT:-}"
 COMPOSE_FLAVOR=""
 DOTFILES_DIR=""
+PI_TOOLS_DIR=""
 
 usage() {
     cat <<'EOF'
@@ -34,6 +35,7 @@ Usage: lab [command]
   lab fail HOST host               Stop a mock host
   lab heal HOST                    Start the host and restore middleware to OK
   lab verify                       Run configuration, SSH, and monitoring checks
+  lab benchmark incidents [OPTS]  Run the seeded Pi incident benchmark
   lab down                         Stop containers but retain lab state
   lab reset [--yes]                Delete containers, volumes, keys, and state
   lab help                         Show this help
@@ -82,6 +84,33 @@ resolve_dotfiles() {
         die "MONITORING_LAB_DOTFILES does not contain install-terminal.sh: $MONITORING_LAB_DOTFILES"
     fi
     die "Protocol Ink dotfiles were not found; clone them to ~/dotfiles or set MONITORING_LAB_DOTFILES"
+}
+
+resolve_pi_tools() {
+    local candidate
+    local -a candidates
+
+    if [[ -n "${MONITORING_LAB_PI_TOOLS:-}" ]]; then
+        candidates=("$MONITORING_LAB_PI_TOOLS")
+    else
+        candidates=(
+            "$HOME/pi-tools"
+            "$HOME/Documents/pi-tools"
+            "$LAB_ROOT/../pi-tools"
+        )
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        [[ -d "$candidate" && -x "$candidate/install.sh" ]] || continue
+        PI_TOOLS_DIR="$(CDPATH= cd -- "$candidate" && pwd -P)"
+        export MONITORING_LAB_PI_TOOLS="$PI_TOOLS_DIR"
+        return
+    done
+
+    if [[ -n "${MONITORING_LAB_PI_TOOLS:-}" ]]; then
+        die "MONITORING_LAB_PI_TOOLS does not contain install.sh: $MONITORING_LAB_PI_TOOLS"
+    fi
+    die "pi-tools was not found; clone it beside monitoring-lab or set MONITORING_LAB_PI_TOOLS"
 }
 
 docker_cli() {
@@ -145,6 +174,7 @@ compose() {
 
 prepare_runtime() {
     resolve_dotfiles
+    resolve_pi_tools
     ensure_runtime
     select_compose
 }
@@ -536,6 +566,27 @@ shell_service() {
     compose exec "$service" /bin/sh
 }
 
+run_benchmark() {
+    local suite
+    suite="${1:-}"
+    [[ -n "$suite" ]] || die "usage: lab benchmark incidents [OPTIONS]"
+    shift || true
+    require_stack
+    need node
+
+    case "$suite" in
+        incidents)
+            INCIDENT_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
+            INCIDENT_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
+            INCIDENT_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
+                node "$LAB_ROOT/benchmarks/incidents/run.mjs" "$@"
+            ;;
+        *)
+            die "unknown benchmark suite '$suite'"
+            ;;
+    esac
+}
+
 verify_lab() {
     local host remote workstation_remote test_host test_state_file
     up_stack
@@ -545,25 +596,41 @@ verify_lab() {
     compose exec -T nagios /usr/local/nagios/bin/nagios -v \
         /usr/local/nagios/etc/nagios.cfg >/dev/null
 
-    note "validating the isolated Ubuntu workstation and SSH host index"
+    note "validating the fresh-WSL workstation baseline"
     compose exec -T workstation /bin/bash -lc '
         set -euo pipefail
         test "$SHELL" = /bin/bash
         test "$(uname -s)" = Linux
+        test "$(node --version)" = "v22.19.0"
+        test "$(pi --version)" = "0.80.10"
         test "$(nvim --version | head -n 1)" = "NVIM v0.12.4"
         test "$(zellij --version)" = "zellij 0.44.3"
         fzf --version | grep -q "^0.72.0 "
-        test "$(hop --select lab-dev-db01 --print)" = lab-dev-db01
-        test "$(hop --list | awk "END { print NR }")" = 11
-        test "$(kb --list | awk "END { print NR }")" = 5
-        peek --no-monitoring lab-dev-db01 | grep -F "HOST RECORD / lab-dev-db01" >/dev/null
-        pulse_summary=$(pulse --summary lab-dev-db01)
-        printf "%s\n" "$pulse_summary" \
-            | grep -Eq "^ICINGA (OK|WARN|CRIT|UNKNOWN) / NAGIOS (OK|WARN|CRIT|UNKNOWN)$"
-        pulse_rows=$(pulse --list)
-        test "$(printf "%s\n" "$pulse_rows" | awk -F "\t" "NR == 1 { print NF }")" = 6
         test -L "$HOME/.config/nvim/init.vim"
         test -L "$HOME/.config/zellij/config.kdl"
+        test -L "$HOME/.pi/agent/extensions/ssh-direct"
+        test "$(readlink "$HOME/.pi/agent/extensions/ssh-direct")" = \
+            /opt/pi-tools/extensions/ssh-direct
+        test -L "$HOME/.pi/agent/skills/incident-investigation"
+        test "$(readlink "$HOME/.pi/agent/skills/incident-investigation")" = \
+            /opt/pi-tools/skills/incident-investigation
+        grep -q "^name: incident-investigation$" \
+            "$HOME/.pi/agent/skills/incident-investigation/SKILL.md"
+        test -L "$HOME/.pi/agent/skills/lab-middleware-health"
+        test "$(readlink "$HOME/.pi/agent/skills/lab-middleware-health")" = \
+            /opt/monitoring-lab/skills/lab-middleware-health
+        grep -q "^name: lab-middleware-health$" \
+            "$HOME/.pi/agent/skills/lab-middleware-health/SKILL.md"
+        jq -e '"'"'has("packages") | not'"'"' "$HOME/.pi/agent/settings.json" >/dev/null
+        test ! -e "$HOME/.pi/agent/extensions/protocol-ops"
+        for removed_tool in hop peek kb pulse pi-safe; do
+            ! command -v "$removed_tool" >/dev/null 2>&1
+        done
+        rpc_state=$(printf "%s\n" "{\"type\":\"get_state\"}" \
+            | PI_OFFLINE=1 pi --mode rpc --no-session --no-approve)
+        printf "%s\n" "$rpc_state" \
+            | jq -e '"'"'.type == "response" and .success == true'"'"' >/dev/null
+        (cd /opt/pi-tools && npm test >/dev/null)
         nvim --headless "+colorscheme protocol-ink" \
             "+if !empty(v:errmsg) | cquit 1 | endif" "+qall"
         zellij --config "$HOME/.config/zellij/config.kdl" \
@@ -593,17 +660,10 @@ verify_lab() {
     set_app_state "$test_host" critical
     trap "printf 'ok\\n' > '$test_state_file'" EXIT
     wait_for_monitor_state "$test_host" 2
-    compose exec -T workstation /bin/bash -lc '
-        test "$(pulse --list | grep -F lab-dev-app01 | grep -c CRIT)" = 2
-    '
 
     note "healing middleware and waiting for both monitors to return OK"
     set_app_state "$test_host" ok
     wait_for_monitor_state "$test_host" 0
-    compose exec -T workstation /bin/bash -lc '
-        pulse_rows=$(pulse --list)
-        ! printf "%s\n" "$pulse_rows" | grep -F lab-dev-app01 >/dev/null
-    '
     trap - EXIT
 
     note "end-to-end verification passed"
@@ -651,6 +711,7 @@ main() {
         fail) fail_host "$@" ;;
         heal) heal_host "$@" ;;
         verify) verify_lab ;;
+        benchmark) run_benchmark "$@" ;;
         down)
             prepare_runtime
             bootstrap_state

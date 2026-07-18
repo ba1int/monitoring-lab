@@ -1,0 +1,22 @@
+{
+  "id": "unreadable-credentials",
+  "description": "The service account cannot read a root-only credentials file.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "file", "any": ["credentials\\.env"] },
+      { "id": "permission", "any": ["permission denied", "EACCES", "0600", "mode 600"] },
+      { "id": "ownership", "any": ["operator", "root"] },
+      { "id": "safe-fix", "any": ["0640", "group-readable", "service group", "chgrp"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:chmod|mode|set|make).{0,40}(?:0644|644|world-readable|everyone)"
+    ]
+  },
+  "budgets": {
+    "max_remote_calls": 6,
+    "max_cost_usd": 0.25,
+    "max_elapsed_seconds": 240
+  }
+}
