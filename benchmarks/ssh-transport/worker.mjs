@@ -277,12 +277,10 @@ async function benchmarkFailureSemantics() {
     return { id: scenario.id, expected: scenario.expected, actual, pass: actual === scenario.expected };
   });
 
-  const baselineTransportEscalates = routerCore.toolFailureRequiresEscalation(
-    { exitCode: 255, timedOut: false, isError: false },
-    false,
-  );
-  let candidateTransportEscalates = false;
-  let remoteExitStaysLow = false;
+  let preflightTransportDefers = false;
+  let postMutationTransportEscalates = false;
+  let preflightRemoteExitDefers = false;
+  let postMutationRemoteExitEscalates = false;
   let maximumContextOverhead = null;
   if (classifierAvailable && transportPredicateAvailable) {
     const kind = sshCore.classifySshFailure({
@@ -290,13 +288,27 @@ async function benchmarkFailureSemantics() {
       timedOut: false,
       stderr: "ssh: Could not resolve hostname missing.invalid: Name or service not known\r\n",
     });
-    candidateTransportEscalates = routerCore.toolFailureRequiresEscalation(
-      { exitCode: 255, timedOut: false, isError: false, transportError: sshCore.isTransportFailureKind(kind) },
+    const transportResult = {
+      exitCode: 255,
+      timedOut: false,
+      isError: false,
+      transportError: sshCore.isTransportFailureKind(kind),
+    };
+    preflightTransportDefers = !routerCore.toolFailureRequiresEscalation(transportResult, false);
+    postMutationTransportEscalates = routerCore.toolFailureRequiresEscalation(transportResult, true);
+    const remoteExitResult = {
+      exitCode: 7,
+      timedOut: false,
+      isError: false,
+      transportError: false,
+    };
+    preflightRemoteExitDefers = !routerCore.toolFailureRequiresEscalation(
+      remoteExitResult,
       false,
     );
-    remoteExitStaysLow = !routerCore.toolFailureRequiresEscalation(
-      { exitCode: 7, timedOut: false, isError: false, transportError: false },
-      false,
+    postMutationRemoteExitEscalates = routerCore.toolFailureRequiresEscalation(
+      remoteExitResult,
+      true,
     );
 
     maximumContextOverhead = Math.max(...scenarios.map((scenario) => {
@@ -327,21 +339,26 @@ async function benchmarkFailureSemantics() {
   const classificationPass = classifications.every((item) => item.pass);
   return {
     classifier_available: classifierAvailable,
-    baseline_transport_escalates: baselineTransportEscalates,
-    candidate_transport_escalates: candidateTransportEscalates,
-    remote_exit_stays_low: remoteExitStaysLow,
+    preflight_transport_defers: preflightTransportDefers,
+    post_mutation_transport_escalates: postMutationTransportEscalates,
+    preflight_remote_exit_defers: preflightRemoteExitDefers,
+    post_mutation_remote_exit_escalates: postMutationRemoteExitEscalates,
     classifications,
     maximum_context_overhead_bytes: maximumContextOverhead,
     acceptance_threshold: {
       exact_classification: "9/9",
-      transport_escalation: true,
-      remote_exit_escalation: false,
+      preflight_transport_escalation: false,
+      post_mutation_transport_escalation: true,
+      preflight_remote_exit_escalation: false,
+      post_mutation_remote_exit_escalation: true,
       maximum_context_overhead_bytes: 40,
     },
     candidate_pass: classifierAvailable
       && classificationPass
-      && candidateTransportEscalates
-      && remoteExitStaysLow
+      && preflightTransportDefers
+      && postMutationTransportEscalates
+      && preflightRemoteExitDefers
+      && postMutationRemoteExitEscalates
       && maximumContextOverhead <= 40,
   };
 }

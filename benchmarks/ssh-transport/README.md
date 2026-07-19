@@ -17,8 +17,10 @@ recovery after the OpenSSH control master is killed without cleanup.
 The transport-failure gate uses live DNS, authentication, refusal, timeout,
 success, and remote-exit cases plus fixed host-key and connection-closure
 fixtures. A candidate must classify every case exactly, escalate actual
-transport failures out of low thinking, leave ordinary read-only command exits
-alone, and add no more than 40 bytes to a rendered result.
+transport failures after mutation, defer preflight failures until the router
+can evaluate the final semantic outcome, leave ordinary preflight command exits
+alone, escalate failed post-mutation checkpoints, and add no more than 40 bytes
+to a rendered result.
 
 The output-safety gate sends ANSI color/cursor sequences, OSC hyperlinks and
 clipboard writes, DCS strings, carriage returns, backspaces, tabs, newlines,

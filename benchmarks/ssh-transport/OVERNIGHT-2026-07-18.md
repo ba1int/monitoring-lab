@@ -1,5 +1,9 @@
 # Overnight execution sprint — 2026-07-18
 
+> Historical note: the later Luna-to-Sol router keeps this transport
+> classification but defers preflight transport failures until semantic final
+> evaluation. Post-mutation transport failures still escalate immediately.
+
 ## Outcome
 
 The sprint evaluated two candidates and retained both, triggering the requested

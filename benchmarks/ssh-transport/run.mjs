@@ -54,7 +54,8 @@ line("Connection reuse threshold", results.multiplexing.candidate_pass ? "PASS" 
 line("Concurrent same-host calls", results.reuse_reliability.concurrent_same_host_pass ? "PASS" : "FAIL");
 line("Dead-master recovery", results.reuse_reliability.stale_socket_recovery_pass ? "PASS" : "FAIL");
 line("Transport classification", results.failure_semantics.candidate_pass ? "PASS" : "FAIL");
-line("Baseline transport escalation", results.failure_semantics.baseline_transport_escalates ? "PASS" : "FAIL");
+line("Preflight transport defer", results.failure_semantics.preflight_transport_defers ? "PASS" : "FAIL");
+line("Post-mutation escalation", results.failure_semantics.post_mutation_transport_escalates ? "PASS" : "FAIL");
 line("Terminal-control sanitization", results.output_safety.candidate_pass ? "PASS" : "FAIL");
 line("Leaked terminal controls", String(results.output_safety.remaining_dangerous_controls));
 process.stdout.write("\n");
