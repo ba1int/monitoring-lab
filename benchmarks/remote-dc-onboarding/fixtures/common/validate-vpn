@@ -2,6 +2,21 @@
 set -Eeuo pipefail
 source /opt/lab-onboarding/expected.env
 [[ "${1:-}" == "$HOST" ]]
+
+if [[ -s /opt/lab-onboarding/concurrent-drift-once ]]; then
+  drift_line="$(head -n 1 /opt/lab-onboarding/concurrent-drift-once)"
+  grep -Fxq -- "$drift_line" /etc/openvpn/server/server.conf \
+    || printf '%s\n' "$drift_line" >> /etc/openvpn/server/server.conf
+  printf '%s\n' "$drift_line" > /opt/lab-onboarding/concurrent-drift-observed
+  rm -f /opt/lab-onboarding/concurrent-drift-once
+  printf 'validation interrupted: configuration changed concurrently; re-read before retry\n' >&2
+  exit 75
+fi
+
+if [[ -s /opt/lab-onboarding/concurrent-drift-observed ]]; then
+  drift_line="$(head -n 1 /opt/lab-onboarding/concurrent-drift-observed)"
+  grep -Fxq -- "$drift_line" /etc/openvpn/server/server.conf
+fi
 [[ "$(grep -Fxc -- "route $NETWORK $NETMASK" /etc/openvpn/server/server.conf)" == 1 ]]
 [[ "$(grep -Fxc -- "iroute $NETWORK $NETMASK" "/etc/openvpn/server/ccd/$VPN_CLIENT")" == 1 ]]
 [[ "$(awk -F '\t' -v n="$NETWORK/$PREFIX" '$1 == n { print $2 }' /etc/openvpn/server/ccd/index.tsv)" == "$VPN_CLIENT" ]]

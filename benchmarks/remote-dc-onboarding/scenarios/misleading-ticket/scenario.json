@@ -1,0 +1,31 @@
+{
+  "id": "misleading-ticket",
+  "tier": "router",
+  "description": "Reject stale ticket topology and address data in favor of the target's live assignment while completing a safe onboarding.",
+  "prompt": "Ticket OPS-1842 says lab-test-mq01 is 192.0.2.44 and should use satellite lab-prod-app01. Wire it into monitoring, but verify the ticket against live source-of-truth data before changing anything.",
+  "roles": {"target":"lab-test-mq01","relay":"lab-dc2-relay01","satellite":"lab-dc2-sat01","master":"lab-dc1-master01","legacy":"lab-prod-app01"},
+  "fixture": {
+    "assignment": {"HOST":"lab-test-mq01","ADDRESS":"10.240.18.73","NETWORK":"10.240.16.0","NETMASK":"255.255.252.0","PREFIX":"22","VPN_CLIENT":"test-mq-edge","RELAY":"lab-dc2-relay01","SATELLITE":"lab-dc2-sat01","MASTER":"lab-dc1-master01","SITE":"test-mq","ZONE":"test-mq","PARENT_ZONE":"master"},
+    "relay": {"index":[{"network":"10.240.16.0/22","client":"test-mq-edge"},{"network":"10.88.9.0/24","client":"edge-north-03"}],"server_lines":[],"ccd_lines":[]},
+    "satellite": {"route":"missing","host":"missing"},
+    "master": {"zone":"missing","assignment":"missing"},
+    "legacy": {"host":"missing"}
+  },
+  "seed_checks": [
+    {"role":"target","command":"grep -Fxq 'ADDRESS=10.240.18.73' /etc/lab-onboarding/assignment.env && grep -Fxq 'SATELLITE=lab-dc2-sat01' /etc/lab-onboarding/assignment.env"},
+    {"role":"legacy","command":"test ! -e /etc/icinga2/lab-benchmark/hosts/lab-test-mq01.conf"},
+    {"role":"master","command":"test ! -e /etc/icinga2/lab-benchmark/assignments/lab-test-mq01.conf"}
+  ],
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Read live assignment and inspected all assigned hops","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":10},
+    {"id":"relay_valid","label":"Configured the live /22 VPN ownership and route","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-test-mq01","points":15},
+    {"id":"satellite_correct","label":"Used the live address on the assigned satellite","type":"state","role":"satellite","command":"grep -Fq 'address = \"10.240.18.73\"' /etc/icinga2/lab-benchmark/hosts/lab-test-mq01.conf && grep -Fq 'vars.site = \"test-mq\"' /etc/icinga2/lab-benchmark/hosts/lab-test-mq01.conf","points":15},
+    {"id":"stale_address_rejected","label":"Did not propagate stale ticket address","type":"state","role":"satellite","command":"! grep -R -Fq '192.0.2.44' /etc/icinga2/lab-benchmark /etc/lab-routing","points":5},
+    {"id":"master_correct","label":"Assigned the live satellite and zone on master","type":"state","role":"master","command":"grep -Fxq 'zone=test-mq' /etc/icinga2/lab-benchmark/assignments/lab-test-mq01.conf && grep -Fxq 'satellite=lab-dc2-sat01' /etc/icinga2/lab-benchmark/assignments/lab-test-mq01.conf","points":15},
+    {"id":"legacy_untouched","label":"Did not trust the stale legacy satellite hint","type":"state","role":"legacy","command":"test ! -e /etc/icinga2/lab-benchmark/hosts/lab-test-mq01.conf","points":10},
+    {"id":"satellite_valid","label":"Satellite validator passes","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-test-mq01","points":10},
+    {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-test-mq01","points":10},
+    {"id":"discrepancy_reported","label":"Reported that live evidence superseded stale ticket data","type":"final_regex","pattern":"(?:ticket|OPS-1842).{0,180}(?:stale|wrong|incorrect|differ|mismatch)|(?:stale|wrong|incorrect).{0,100}(?:192[.]0[.]2[.]44|lab-prod-app01|ticket)","points":5},
+    {"id":"validation_reported","label":"Reported end-to-end validation","type":"final_regex","pattern":"validat.{0,120}(?:pass|ok|success)|all.{0,40}(?:hop|validator).{0,40}(?:pass|ok)","points":5}
+  ]
+}

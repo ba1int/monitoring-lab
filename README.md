@@ -231,6 +231,27 @@ lab benchmark remote-dc-onboarding --cases "$HARD_CASES" --thinking medium --run
 lab benchmark remote-dc-onboarding --cases "$HARD_CASES" --thinking low --run-id hard-low
 ```
 
+The router-discrimination tier adds failure modes where blindly completing the
+runbook is not enough: a one-shot transport interruption, a concurrent operator
+edit, stale ticket data that conflicts with live assignment data, and an
+unsupported active-active topology whose correct outcome is escalation.
+
+```sh
+ROUTER_CASES=transient-resume,concurrent-drift,misleading-ticket,unsupported-topology
+lab benchmark remote-dc-onboarding --cases "$ROUTER_CASES" --fixtures-only
+lab benchmark model-matrix \
+  --suite remote-dc-onboarding \
+  --candidates openai-codex/gpt-5.6-luna:medium,openai-codex/gpt-5.6-sol:high \
+  --cases "$ROUTER_CASES" \
+  --run-id router-discrimination
+```
+
+These scenarios evaluate whether a cheaper first-line model can recover,
+preserve shared state, reject stale instructions, and stop for escalation. They
+do not by themselves validate an automatic router; compare a staged
+Luna-to-Sol policy against always-Sol after the individual model behavior is
+repeatable.
+
 `--rescore` re-evaluates report wording and tool-use checkpoints from saved
 sessions while retaining the state checks captured before fixture cleanup. It
 does not call a model or pretend to re-check state that no longer exists.

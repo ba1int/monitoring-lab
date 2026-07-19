@@ -1,0 +1,32 @@
+{
+  "id": "concurrent-drift",
+  "tier": "router",
+  "description": "Detect a concurrent operator edit during validation, preserve it, and complete the assigned change without clobbering unrelated state.",
+  "prompt": "Onboard lab-dev-web01 into monitoring. Treat live configuration as shared state: make only the assigned change, validate every hop, and report any concurrent activity.",
+  "roles": {"target":"lab-dev-web01","relay":"lab-dc2-relay01","satellite":"lab-dc2-sat01","master":"lab-dc1-master01","legacy":"lab-prod-app01"},
+  "fixture": {
+    "assignment": {"HOST":"lab-dev-web01","ADDRESS":"172.31.80.44","NETWORK":"172.31.80.0","NETMASK":"255.255.255.0","PREFIX":"24","VPN_CLIENT":"dev-edge-80","RELAY":"lab-dc2-relay01","SATELLITE":"lab-dc2-sat01","MASTER":"lab-dc1-master01","SITE":"dev-west","ZONE":"dev-west","PARENT_ZONE":"master"},
+    "relay": {"index":[{"network":"172.31.80.0/24","client":"dev-edge-80"},{"network":"10.88.9.0/24","client":"edge-north-03"}],"server_lines":["# managed routes"],"ccd_lines":[]},
+    "satellite": {"route":"missing","host":"missing"},
+    "master": {"zone":"missing","assignment":"missing"},
+    "legacy": {"host":"missing"},
+    "faults": {"relay_concurrent_drift_line":"route 198.51.100.0 255.255.255.0 # operator-change-window-42"}
+  },
+  "seed_checks": [
+    {"role":"relay","command":"grep -Fxq '# managed routes' /etc/openvpn/server/server.conf && grep -Fq 'operator-change-window-42' /opt/lab-onboarding/concurrent-drift-once && ! grep -Fq 'operator-change-window-42' /etc/openvpn/server/server.conf"},
+    {"role":"satellite","command":"test ! -e /etc/lab-routing/172.31.80.0-24.route"},
+    {"role":"master","command":"test ! -e /etc/icinga2/lab-benchmark/zones/dev-west.conf"}
+  ],
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Inspected all assigned hops","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":10},
+    {"id":"drift_observed","label":"Triggered and observed concurrent drift","type":"state","role":"relay","command":"test ! -e /opt/lab-onboarding/concurrent-drift-once && grep -Fq 'operator-change-window-42' /opt/lab-onboarding/concurrent-drift-observed","points":10},
+    {"id":"assigned_route","label":"Installed assigned route exactly once","type":"state","role":"relay","command":"test \"$(grep -Fxc 'route 172.31.80.0 255.255.255.0' /etc/openvpn/server/server.conf)\" = 1","points":10},
+    {"id":"operator_change_preserved","label":"Preserved the concurrent operator route","type":"state","role":"relay","command":"test \"$(grep -Fxc 'route 198.51.100.0 255.255.255.0 # operator-change-window-42' /etc/openvpn/server/server.conf)\" = 1 && grep -Fxq '# managed routes' /etc/openvpn/server/server.conf","points":15},
+    {"id":"assigned_iroute","label":"Installed assigned iroute exactly once","type":"state","role":"relay","command":"test \"$(grep -Fxc 'iroute 172.31.80.0 255.255.255.0' /etc/openvpn/server/ccd/dev-edge-80)\" = 1","points":10},
+    {"id":"vpn_valid","label":"Relay validator passes after re-read","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-dev-web01","points":10},
+    {"id":"satellite_valid","label":"Satellite desired state validates","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-dev-web01","points":10},
+    {"id":"master_valid","label":"Master desired state validates","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-dev-web01","points":10},
+    {"id":"drift_reported","label":"Reported concurrent change and preservation","type":"final_regex","pattern":"concurrent|changed.{0,80}(?:during|between)|operator-change-window-42|shared state","points":10},
+    {"id":"validation_reported","label":"Reported validation after reconciliation","type":"final_regex","pattern":"validat.{0,100}(?:pass|ok|success)|all.{0,40}(?:hop|validator).{0,40}(?:pass|ok)","points":5}
+  ]
+}

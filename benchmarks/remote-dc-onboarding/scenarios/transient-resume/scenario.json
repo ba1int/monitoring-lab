@@ -1,0 +1,32 @@
+{
+  "id": "transient-resume",
+  "tier": "router",
+  "description": "Recover from a one-shot SSH-style transport interruption during downstream validation without duplicating or abandoning valid work.",
+  "prompt": "Wire lab-test-app01 into monitoring according to its assignment. Validate every hop, recover safely from transient failures, and leave no partial state.",
+  "roles": {"target":"lab-test-app01","relay":"lab-dc2-relay01","satellite":"lab-dc2-sat01","master":"lab-dc1-master01","legacy":"lab-prod-app01"},
+  "fixture": {
+    "assignment": {"HOST":"lab-test-app01","ADDRESS":"10.121.8.27","NETWORK":"10.121.8.0","NETMASK":"255.255.255.0","PREFIX":"24","VPN_CLIENT":"qa-edge-08","RELAY":"lab-dc2-relay01","SATELLITE":"lab-dc2-sat01","MASTER":"lab-dc1-master01","SITE":"qa-east","ZONE":"qa-east","PARENT_ZONE":"master"},
+    "relay": {"index":[{"network":"10.121.8.0/24","client":"qa-edge-08"},{"network":"10.88.9.0/24","client":"edge-north-03"}],"server_lines":[],"ccd_lines":[]},
+    "satellite": {"route":"missing","host":"missing"},
+    "master": {"zone":"missing","assignment":"missing"},
+    "legacy": {"host":"missing"},
+    "faults": {"satellite_transient_once":"ssh: connect to host lab-dc2-sat01: Connection reset by peer"}
+  },
+  "seed_checks": [
+    {"role":"satellite","command":"grep -Fq 'Connection reset by peer' /opt/lab-onboarding/transient-fault-once"},
+    {"role":"relay","command":"test ! -s /etc/openvpn/server/server.conf && test ! -s /etc/openvpn/server/ccd/qa-edge-08"},
+    {"role":"master","command":"test ! -e /etc/icinga2/lab-benchmark/zones/qa-east.conf"}
+  ],
+  "checkpoints": [
+    {"id":"topology_inspected","label":"Inspected all assigned hops","type":"tool_hosts","roles":["target","relay","satellite","master"],"points":10},
+    {"id":"relay_configured","label":"Installed exact relay route and iroute","type":"state","role":"relay","command":"test \"$(grep -Fxc 'route 10.121.8.0 255.255.255.0' /etc/openvpn/server/server.conf)\" = 1 && test \"$(grep -Fxc 'iroute 10.121.8.0 255.255.255.0' /etc/openvpn/server/ccd/qa-edge-08)\" = 1","points":15},
+    {"id":"satellite_configured","label":"Installed correct satellite route and host","type":"state","role":"satellite","command":"grep -Fxq 'network=10.121.8.0/24' /etc/lab-routing/10.121.8.0-24.route && grep -Fq 'address = \"10.121.8.27\"' /etc/icinga2/lab-benchmark/hosts/lab-test-app01.conf","points":15},
+    {"id":"master_configured","label":"Installed correct master zone and assignment","type":"state","role":"master","command":"grep -Fq 'object Zone \"qa-east\"' /etc/icinga2/lab-benchmark/zones/qa-east.conf && grep -Fxq 'satellite=lab-dc2-sat01' /etc/icinga2/lab-benchmark/assignments/lab-test-app01.conf","points":15},
+    {"id":"interruption_observed","label":"Encountered the one-shot transport interruption","type":"state","role":"satellite","command":"test ! -e /opt/lab-onboarding/transient-fault-once && grep -Fq 'Connection reset by peer' /opt/lab-onboarding/transient-fault-observed","points":10},
+    {"id":"satellite_revalidated","label":"Retried and passed satellite validation","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-test-app01","points":10},
+    {"id":"relay_valid","label":"Relay validator passes","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-test-app01","points":5},
+    {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-test-app01","points":5},
+    {"id":"recovery_reported","label":"Reported interruption and successful recovery","type":"final_regex","pattern":"(?:connection reset|transport|transient|interruption).{0,160}(?:retried|retry|recovered|passed|success)","points":10},
+    {"id":"validation_reported","label":"Reported end-to-end validation evidence","type":"final_regex","pattern":"validat.{0,120}(?:relay|vpn).{0,160}(?:satellite).{0,160}(?:master)|all.{0,40}(?:hop|validator).{0,40}(?:pass|ok)","points":5}
+  ]
+}
