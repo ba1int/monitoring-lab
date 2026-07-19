@@ -12,6 +12,7 @@ Review branches:
   - `9a6fa53 Harden SSH failure and output semantics`
 - `monitoring-lab`: `codex/overnight-exec-20260718`
   - `bd6ccb3 Benchmark SSH failure and output safety`
+  - `1b98859 Fix hidden CR benchmark scoring`
 
 The branch builds were deployed only to the isolated Hermes lab.
 
@@ -89,10 +90,14 @@ write to the clipboard through the Protocol Ink terminal surface.
 - Full lab verification: Compose, workstation, every SSH alias, Icinga, Nagios,
   alert injection, and healing passed end to end.
 - Real Pi transport check: routine low → transport-failure high passed.
-- Full high-thinking incident run: **7/8** passed. `hidden-cr` found the correct
-  hidden byte, mechanism, fix, validation, and rollback but missed the existing
-  scorer's `causal-location` phrase. The previous pre-branch run failed the
-  same scenario on the same scoring item, so this is not a branch regression.
+- Original full high-thinking incident run: **7/8** passed. `hidden-cr` found
+  the correct hidden byte, mechanism, fix, validation, and rollback but missed
+  the old scorer's `causal-location` phrase. Follow-up commit `1b98859`
+  replaced that wording check with a bounded causal relationship between the
+  hidden byte and `UPSTREAM_HOST` or `middleware.env`. Its deterministic suite
+  passes two valid phrasings and rejects two misleading near-matches (**11/11**
+  scorer tests). A fresh model replay remains pending because Hermes did not
+  accept a non-interactive SSH connection during the follow-up.
 
 ## Review
 
