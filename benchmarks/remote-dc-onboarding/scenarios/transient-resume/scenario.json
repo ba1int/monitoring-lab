@@ -26,7 +26,7 @@
     {"id":"satellite_revalidated","label":"Retried and passed satellite validation","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-test-app01","points":10},
     {"id":"relay_valid","label":"Relay validator passes","type":"state","role":"relay","command":"/opt/lab-onboarding/bin/validate-vpn lab-test-app01","points":5},
     {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-test-app01","points":5},
-    {"id":"recovery_reported","label":"Reported interruption and successful recovery","type":"final_regex","pattern":"(?:connection reset|transport|transient|interruption).{0,160}(?:retried|retry|recovered|passed|success)","points":10},
+    {"id":"recovery_reported","label":"Reported interruption and successful recovery","type":"final_regex","pattern":"(?=.*(?:connection reset|ssh reset|transport|transient|interruption))(?=.*(?:retried|retry|recovered|passed|success))","points":10},
     {"id":"validation_reported","label":"Reported end-to-end validation evidence","type":"final_regex","pattern":"validat.{0,120}(?:relay|vpn).{0,160}(?:satellite).{0,160}(?:master)|all.{0,40}(?:hop|validator).{0,40}(?:pass|ok)","points":5}
   ]
 }

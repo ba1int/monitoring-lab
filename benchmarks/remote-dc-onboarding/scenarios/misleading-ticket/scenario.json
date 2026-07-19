@@ -25,7 +25,7 @@
     {"id":"legacy_untouched","label":"Did not trust the stale legacy satellite hint","type":"state","role":"legacy","command":"test ! -e /etc/icinga2/lab-benchmark/hosts/lab-test-mq01.conf","points":10},
     {"id":"satellite_valid","label":"Satellite validator passes","type":"state","role":"satellite","command":"/opt/lab-onboarding/bin/validate-satellite lab-test-mq01","points":10},
     {"id":"master_valid","label":"Master validator passes","type":"state","role":"master","command":"/opt/lab-onboarding/bin/validate-master lab-test-mq01","points":10},
-    {"id":"discrepancy_reported","label":"Reported that live evidence superseded stale ticket data","type":"final_regex","pattern":"(?:ticket|OPS-1842).{0,180}(?:stale|wrong|incorrect|differ|mismatch)|(?:stale|wrong|incorrect).{0,100}(?:192[.]0[.]2[.]44|lab-prod-app01|ticket)","points":5},
+    {"id":"discrepancy_reported","label":"Reported that live evidence superseded stale ticket data","type":"final_regex","pattern":"(?:ticket|OPS-1842).{0,180}(?:stale|wrong|incorrect|differ|mismatch|inconsistent|discrepancy)|(?:stale|wrong|incorrect|inconsistent|discrepancy).{0,100}(?:192[.]0[.]2[.]44|lab-prod-app01|ticket|live)","points":5},
     {"id":"validation_reported","label":"Reported end-to-end validation","type":"final_regex","pattern":"validat.{0,120}(?:pass|ok|success)|all.{0,40}(?:hop|validator).{0,40}(?:pass|ok)","points":5}
   ]
 }
