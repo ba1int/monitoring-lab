@@ -252,6 +252,20 @@ do not by themselves validate an automatic router; compare a staged
 Luna-to-Sol policy against always-Sol after the individual model behavior is
 repeatable.
 
+Run the installed Pi router itself with:
+
+```sh
+lab benchmark remote-dc-onboarding \
+  --router \
+  --cases misleading-ticket,unsupported-topology \
+  --run-id router-e2e
+```
+
+Router runs record `model_sequence` for selections and `model_usage_sequence`
+for models that actually produced assistant output. Use the latter to verify a
+Luna-to-Sol retry or a Luna-only legitimate stop without mistaking Pi's initial
+configured model for a routed call.
+
 `--rescore` re-evaluates report wording and tool-use checkpoints from saved
 sessions while retaining the state checks captured before fixture cleanup. It
 does not call a model or pretend to re-check state that no longer exists.

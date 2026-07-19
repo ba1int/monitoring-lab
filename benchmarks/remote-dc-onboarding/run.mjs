@@ -48,6 +48,7 @@ Usage: node run.mjs [options]
   --limit N               Run only the first N selected scenarios
   --thinking LEVEL        Pi thinking level (default: high)
   --model PROVIDER/MODEL  Override the configured Pi model
+  --router                Enable the installed automatic model router
   --timeout-seconds N     Per-scenario Pi timeout (default: 600)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
@@ -66,6 +67,7 @@ function parseArgs(argv) {
     cases: null, limit: null, thinking: "high", model: null,
     timeoutSeconds: 600, outputRoot: DEFAULT_OUTPUT_ROOT, runId: null,
     staticOnly: false, fixturesOnly: false, rescore: null,
+    router: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -79,6 +81,7 @@ function parseArgs(argv) {
       case "--limit": options.limit = Number(value()); break;
       case "--thinking": options.thinking = value(); break;
       case "--model": options.model = value(); break;
+      case "--router": options.router = true; break;
       case "--timeout-seconds": options.timeoutSeconds = Number(value()); break;
       case "--output-root": options.outputRoot = value(); break;
       case "--run-id": options.runId = value(); break;
@@ -102,8 +105,11 @@ function parseArgs(argv) {
   if (options.staticOnly && options.fixturesOnly) {
     throw new Error("--static-only and --fixtures-only are mutually exclusive");
   }
+  if (options.router && options.model) {
+    throw new Error("--router cannot be combined with --model");
+  }
   if (options.rescore && (options.staticOnly || options.fixturesOnly || options.runId
-      || options.cases || options.limit !== null)) {
+      || options.cases || options.limit !== null || options.router)) {
     throw new Error("--rescore cannot be combined with selection, fixture, static, or run-id options");
   }
   return options;
@@ -518,7 +524,16 @@ function parseSession(text) {
     total.cost += current.cost?.total ?? 0;
     return total;
   }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 });
-  return { entries, toolCalls, final, finalText, usage };
+  const modelSequence = entries
+    .filter((entry) => entry.type === "model_change")
+    .map((entry) => `${entry.provider}/${entry.modelId}`)
+    .filter((model, index, items) => index === 0 || model !== items[index - 1]);
+  const modelUsageSequence = entries
+    .filter((entry) => entry.type === "message" && entry.message?.role === "assistant"
+      && entry.message?.provider && entry.message?.model)
+    .map((entry) => `${entry.message.provider}/${entry.message.model}`)
+    .filter((model, index, items) => index === 0 || model !== items[index - 1]);
+  return { entries, toolCalls, final, finalText, usage, modelSequence, modelUsageSequence };
 }
 
 function toolHosts(session) {
@@ -646,11 +661,12 @@ async function runScenario({ manifest }, context) {
       "exec", "-w", "/home/operator",
       "-e", "PI_SKIP_VERSION_CHECK=1",
       "-e", "PI_TELEMETRY=0",
-      "-e", "PI_THINKING_ROUTER=off",
+      "-e", `PI_THINKING_ROUTER=${options.router ? "on" : "off"}`,
       workstation, "/usr/bin/timeout", "--signal=TERM", "--kill-after=5", `${options.timeoutSeconds}s`,
-      "/home/operator/.local/bin/pi", "--mode", "json", "--no-approve", "--thinking", options.thinking,
+      "/home/operator/.local/bin/pi", "--mode", "json", "--no-approve",
       "--session-dir", `${sessionRoot}/sessions`, "--name", `remote-dc-${manifest.id}`,
     ];
+    if (!options.router) args.push("--thinking", options.thinking);
     if (options.model) args.push("--model", options.model);
     args.push(manifest.prompt);
     piResult = await docker(args, { captureStdout: false, timeoutMs: (options.timeoutSeconds + 20) * 1_000 });
@@ -673,7 +689,10 @@ async function runScenario({ manifest }, context) {
       checkpoints,
       model: session.final?.message.model ?? null,
       provider: session.final?.message.provider ?? null,
-      thinking: options.thinking,
+      thinking: options.router ? "auto" : options.thinking,
+      router: options.router,
+      model_sequence: session.modelSequence,
+      model_usage_sequence: session.modelUsageSequence,
       elapsed_ms: elapsedMs,
       pi_exit: piResult?.code ?? null,
       remote_calls: remoteCalls,
