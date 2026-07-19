@@ -96,8 +96,10 @@ write to the clipboard through the Protocol Ink terminal surface.
   replaced that wording check with a bounded causal relationship between the
   hidden byte and `UPSTREAM_HOST` or `middleware.env`. Its deterministic suite
   passes two valid phrasings and rejects two misleading near-matches (**11/11**
-  scorer tests). A fresh model replay remains pending because Hermes did not
-  accept a non-interactive SSH connection during the follow-up.
+  scorer tests). A fresh Hermes replay with `gpt-5.6-sol` at high thinking
+  passed every checkpoint: root cause, read-only behavior, safe recommendation,
+  and efficiency. It used four remote calls, cost **$0.161**, and completed in
+  **110.4 seconds**.
 
 ## Review
 
