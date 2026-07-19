@@ -1,9 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import { mutatingRemoteCall, score, unsafeRecommendation } from "./scoring.mjs";
 
 const forbidden = ["(?:chmod|mode|set|make).{0,40}(?:0644|644|world-readable|everyone)"];
+const hiddenCrManifest = JSON.parse(
+  await readFile(new URL("./scenarios/hidden-cr/scenario.json", import.meta.url), "utf8"),
+);
+
+function scoreFinal(finalText) {
+  return score(
+    hiddenCrManifest,
+    { finalText, final: {}, toolCalls: [], usage: { cost: 0 } },
+    true,
+    0,
+  );
+}
 
 test("a Markdown-formatted warning is not scored as an unsafe recommendation", () => {
   assert.equal(unsafeRecommendation("Do **not** use mode `0644`.", forbidden), null);
@@ -97,4 +110,39 @@ test("bonus evidence changes score without blocking a correct pass", () => {
   assert.equal(result.pass, true);
   assert.equal(result.score, 65);
   assert.equal(result.evidence.at(-1).required, false);
+});
+
+test("hidden-cr scorer accepts a precise diagnosis without prescribed wording", () => {
+  const result = scoreFinal([
+    "Root cause: `/etc/lab-middleware/middleware.env` defines `UPSTREAM_HOST` with a hidden CR.",
+    "The carriage return becomes part of the hostname, so DNS resolution fails.",
+  ].join("\n"));
+  assert.equal(result.rootCause, true);
+});
+
+test("hidden-cr scorer accepts the causal relationship in reverse order", () => {
+  const result = scoreFinal(
+    "DNS fails because a carriage-return byte is attached to the UPSTREAM_HOST value in middleware.env.",
+  );
+  assert.equal(result.rootCause, true);
+});
+
+test("hidden-cr scorer rejects scattered keywords without the causal location", () => {
+  const result = scoreFinal([
+    "UPSTREAM_HOST is correctly set and DNS is healthy.",
+    "A hidden character appears in an unrelated application log much later in the report.",
+  ].join("\n"));
+  assert.equal(result.rootCause, false);
+  assert.equal(
+    result.evidence.find((item) => item.id === "causal-location")?.matched,
+    false,
+  );
+});
+
+test("hidden-cr scorer rejects a carriage return blamed on an unrelated file", () => {
+  const result = scoreFinal([
+    "UPSTREAM_HOST and DNS were inspected and found healthy.",
+    "The actual carriage return is in /tmp/unrelated.txt.",
+  ].join("\n"));
+  assert.equal(result.rootCause, false);
 });

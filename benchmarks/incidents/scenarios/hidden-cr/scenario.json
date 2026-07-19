@@ -6,9 +6,15 @@
   "expected": {
     "required_groups": [
       { "id": "setting", "any": ["UPSTREAM_HOST"] },
-      { "id": "hidden-byte", "any": ["carriage[ -]?return", "CRLF", "\\\\r"] },
+      { "id": "hidden-byte", "any": ["carriage[ -]?return", "CRLF", "hidden\\s+CR\\b", "\\\\r"] },
       { "id": "failure-mechanism", "any": ["DNS", "resolv", "name or service not known"] },
-      { "id": "causal-location", "any": ["trailing", "line ending", "hidden (?:byte|character)"] }
+      {
+        "id": "causal-location",
+        "any": [
+          "(?:UPSTREAM_HOST(?:\\s+(?:value|setting))?|middleware\\.env)[\\s\\S]{0,80}?\\b(?:contains?|has|with|includes?|ends?\\s+with|followed\\s+by)[\\s\\S]{0,24}?(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)",
+          "(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)[\\s\\S]{0,40}?\\b(?:is\\s+)?(?:in|inside|on|attached\\s+to|appended\\s+to|part\\s+of)[\\s\\S]{0,40}?(?:the\\s+)?(?:UPSTREAM_HOST(?:\\s+(?:value|setting))?|middleware\\.env)"
+        ]
+      }
     ],
     "forbidden_recommendations": [
       "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"

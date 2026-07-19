@@ -99,6 +99,15 @@ async function sshExec(host, command, { controlPath } = {}) {
   return result;
 }
 
+async function sshRaw(host, command, { timeoutMs = 30_000 } = {}) {
+  const args = baseArgs(host);
+  args.push("exec bash -se");
+  return run("ssh", args, {
+    input: `set -o pipefail\n${command}\n`,
+    timeoutMs,
+  });
+}
+
 function percentile(values, fraction) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))];
@@ -214,6 +223,193 @@ async function benchmarkReuseReliability() {
     stale_socket_recovery_pass: staleRecoveryPass,
     error: recoveryError,
     regression_pass: concurrentPass && staleRecoveryPass,
+  };
+}
+
+async function benchmarkFailureSemantics() {
+  const liveScenarios = [
+    { id: "success", host: HOSTS[0], command: "true", expected: null },
+    { id: "remote-exit", host: HOSTS[0], command: "printf 'application failed\\n' >&2; exit 7", expected: "remote_exit" },
+    { id: "dns", host: "missing-host.invalid", command: "true", expected: "dns" },
+    { id: "refused", host: "operator@127.0.0.1", command: "true", expected: "connection_refused" },
+    { id: "authentication", host: `nobody@${HOSTS[0]}`, command: "true", expected: "authentication" },
+    { id: "timeout", host: HOSTS[0], command: "sleep 3", timeoutMs: 500, expected: "timeout" },
+  ];
+  const staticScenarios = [
+    {
+      id: "host-key",
+      result: { exitCode: 255, timedOut: false, stderr: "Host key verification failed.\r\n" },
+      expected: "host_key",
+    },
+    {
+      id: "connection-closed",
+      result: { exitCode: 255, timedOut: false, stderr: "kex_exchange_identification: Connection closed by remote host\r\n" },
+      expected: "connection_closed",
+    },
+    {
+      id: "remote-255",
+      result: { exitCode: 255, timedOut: false, stderr: "application chose exit 255\n" },
+      expected: "remote_exit",
+    },
+  ];
+
+  const liveResults = [];
+  for (const scenario of liveScenarios) {
+    const raw = await sshRaw(scenario.host, scenario.command, { timeoutMs: scenario.timeoutMs });
+    liveResults.push({
+      id: scenario.id,
+      expected: scenario.expected,
+      result: {
+        exitCode: raw.exitCode,
+        timedOut: raw.timedOut,
+        stderr: raw.stderr.toString("utf8"),
+      },
+    });
+  }
+
+  const sshCore = await import("file:///opt/pi-tools/extensions/ssh-direct/core.js");
+  const routerCore = await import("file:///opt/pi-tools/extensions/thinking-router/core.js");
+  const classifierAvailable = typeof sshCore.classifySshFailure === "function";
+  const transportPredicateAvailable = typeof sshCore.isTransportFailureKind === "function";
+  const scenarios = [...liveResults, ...staticScenarios];
+  const classifications = scenarios.map((scenario) => {
+    const actual = classifierAvailable ? sshCore.classifySshFailure(scenario.result) : null;
+    return { id: scenario.id, expected: scenario.expected, actual, pass: actual === scenario.expected };
+  });
+
+  const baselineTransportEscalates = routerCore.toolFailureRequiresEscalation(
+    { exitCode: 255, timedOut: false, isError: false },
+    false,
+  );
+  let candidateTransportEscalates = false;
+  let remoteExitStaysLow = false;
+  let maximumContextOverhead = null;
+  if (classifierAvailable && transportPredicateAvailable) {
+    const kind = sshCore.classifySshFailure({
+      exitCode: 255,
+      timedOut: false,
+      stderr: "ssh: Could not resolve hostname missing.invalid: Name or service not known\r\n",
+    });
+    candidateTransportEscalates = routerCore.toolFailureRequiresEscalation(
+      { exitCode: 255, timedOut: false, isError: false, transportError: sshCore.isTransportFailureKind(kind) },
+      false,
+    );
+    remoteExitStaysLow = !routerCore.toolFailureRequiresEscalation(
+      { exitCode: 7, timedOut: false, isError: false, transportError: false },
+      false,
+    );
+
+    maximumContextOverhead = Math.max(...scenarios.map((scenario) => {
+      const base = sshCore.formatResult({
+        host: "example",
+        exitCode: scenario.result.exitCode,
+        stdout: "",
+        stderr: scenario.result.stderr,
+        elapsedMs: 1,
+        maxOutputBytes: 16 * 1024,
+        timedOut: scenario.result.timedOut,
+      }).text;
+      const kindForScenario = sshCore.classifySshFailure(scenario.result);
+      const classified = sshCore.formatResult({
+        host: "example",
+        exitCode: scenario.result.exitCode,
+        stdout: "",
+        stderr: scenario.result.stderr,
+        elapsedMs: 1,
+        maxOutputBytes: 16 * 1024,
+        timedOut: scenario.result.timedOut,
+        failureKind: kindForScenario,
+      }).text;
+      return Buffer.byteLength(classified) - Buffer.byteLength(base);
+    }));
+  }
+
+  const classificationPass = classifications.every((item) => item.pass);
+  return {
+    classifier_available: classifierAvailable,
+    baseline_transport_escalates: baselineTransportEscalates,
+    candidate_transport_escalates: candidateTransportEscalates,
+    remote_exit_stays_low: remoteExitStaysLow,
+    classifications,
+    maximum_context_overhead_bytes: maximumContextOverhead,
+    acceptance_threshold: {
+      exact_classification: "9/9",
+      transport_escalation: true,
+      remote_exit_escalation: false,
+      maximum_context_overhead_bytes: 40,
+    },
+    candidate_pass: classifierAvailable
+      && classificationPass
+      && candidateTransportEscalates
+      && remoteExitStaysLow
+      && maximumContextOverhead <= 40,
+  };
+}
+
+function unsafeTerminalControls(text) {
+  return [...text].filter((character) => {
+    const code = character.charCodeAt(0);
+    return code === 0x1b
+      || (code < 0x20 && character !== "\n" && character !== "\t")
+      || (code >= 0x7f && code <= 0x9f);
+  }).length;
+}
+
+async function benchmarkOutputSafety() {
+  const malicious = [
+    "plain\t雪\n",
+    "\u001b[31mred\u001b[0m\n",
+    "\u001b]52;c;Y2xpcGJvYXJkLXBvaXNvbg==\u0007after\n",
+    "\u001b]8;;https://example.invalid\u0007link\u001b]8;;\u0007\n",
+    "cursor\u001b[2Jdone\n",
+    "carriage\roverwrite\n",
+    "back\bspace\n",
+    "\u001bPprivate-device-command\u001b\\\n",
+  ].join("");
+  const expected = [
+    "plain\t雪\n",
+    "red\n",
+    "after\n",
+    "link\n",
+    "cursordone\n",
+    "carriageoverwrite\n",
+    "backspace\n",
+    "\n",
+  ].join("");
+  const normal = "host=app01 status=ok\nsecond\tcolumn 雪\n";
+  const live = await sshRaw(HOSTS[0], "printf '\\033[31mred\\033[0m\\n\\033]52;c;Y2xpcGJvYXJkLXBvaXNvbg==\\aafter\\n'");
+  const rawLive = live.stdout.toString("utf8");
+  const sshCore = await import("file:///opt/pi-tools/extensions/ssh-direct/core.js");
+  const sanitizerAvailable = typeof sshCore.sanitizeTerminalText === "function";
+  const sanitized = sanitizerAvailable ? sshCore.sanitizeTerminalText(malicious) : malicious;
+  const sanitizedLive = sanitizerAvailable ? sshCore.sanitizeTerminalText(rawLive) : rawLive;
+  const normalAfter = sanitizerAvailable ? sshCore.sanitizeTerminalText(normal) : normal;
+  const rawDangerousControls = unsafeTerminalControls(malicious);
+  const remainingDangerousControls = unsafeTerminalControls(sanitized);
+  const liveRemainingDangerousControls = unsafeTerminalControls(sanitizedLive);
+  const contextDelta = Buffer.byteLength(sanitized) - Buffer.byteLength(malicious);
+
+  return {
+    sanitizer_available: sanitizerAvailable,
+    baseline_dangerous_controls: rawDangerousControls,
+    remaining_dangerous_controls: remainingDangerousControls,
+    live_remaining_dangerous_controls: liveRemainingDangerousControls,
+    exact_expected_output: sanitized === expected,
+    normal_output_unchanged: normalAfter === normal,
+    context_delta_bytes: contextDelta,
+    acceptance_threshold: {
+      remaining_dangerous_controls: 0,
+      live_remaining_dangerous_controls: 0,
+      exact_expected_output: true,
+      normal_output_unchanged: true,
+      maximum_context_growth_bytes: 0,
+    },
+    candidate_pass: sanitizerAvailable
+      && remainingDangerousControls === 0
+      && liveRemainingDangerousControls === 0
+      && sanitized === expected
+      && normalAfter === normal
+      && contextDelta <= 0,
   };
 }
 
@@ -358,6 +554,8 @@ const results = {
   },
   multiplexing: await benchmarkMultiplexing(),
   reuse_reliability: await benchmarkReuseReliability(),
+  failure_semantics: await benchmarkFailureSemantics(),
+  output_safety: await benchmarkOutputSafety(),
   fanout: await benchmarkFanout(),
   staging: await benchmarkStage(),
 };

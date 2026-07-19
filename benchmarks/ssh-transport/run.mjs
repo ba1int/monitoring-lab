@@ -53,6 +53,10 @@ line("Connection reuse median saved", `${results.multiplexing.median_saved_perce
 line("Connection reuse threshold", results.multiplexing.candidate_pass ? "PASS" : "FAIL");
 line("Concurrent same-host calls", results.reuse_reliability.concurrent_same_host_pass ? "PASS" : "FAIL");
 line("Dead-master recovery", results.reuse_reliability.stale_socket_recovery_pass ? "PASS" : "FAIL");
+line("Transport classification", results.failure_semantics.candidate_pass ? "PASS" : "FAIL");
+line("Baseline transport escalation", results.failure_semantics.baseline_transport_escalates ? "PASS" : "FAIL");
+line("Terminal-control sanitization", results.output_safety.candidate_pass ? "PASS" : "FAIL");
+line("Leaked terminal controls", String(results.output_safety.remaining_dangerous_controls));
 process.stdout.write("\n");
 line("Parallel ssh_exec latency", `${results.fanout.current_parallel_ssh_exec_ms} ms`);
 line("Bounded fanout latency", `${results.fanout.bounded_fanout_ms} ms`);
