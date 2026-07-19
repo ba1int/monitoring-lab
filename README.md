@@ -20,12 +20,14 @@ The workstation contains:
 - Pi pinned by the mounted `pi-tools` repository;
 - the repository-owned stateless `ssh_exec` tool;
 - the repository-owned zero-token low/high thinking router;
+- the repository-owned zero-token task ledger and Zellij viewer;
 - the generic `incident-investigation` reasoning skill; and
 - the lab-only `lab-middleware-health` and `lab-host-onboarding` test skills.
 
 There are no third-party Pi extensions or packages. Protocol Ops, Tura-derived
-runbooks, task/checkpoint state, permission packages, reviewer agents, `hop`,
-`peek`, `kb`, `pulse`, and `pi-safe` are absent.
+runbooks, durable task/checkpoint orchestration, permission packages, reviewer
+agents, `hop`, `peek`, `kb`, `pulse`, and `pi-safe` are absent. The task ledger
+is a bounded local display snapshot; it does not inject prompts or control Pi.
 
 `ssh_exec` takes a literal host on every call. A user can write “inspect
 lab-prod-app01” or describe a multi-host task normally; Pi needs no `/ssh`
@@ -46,6 +48,7 @@ work skill (work WSL only)
           v
 Pi reasoning -> ssh_exec(host, command) -> SSH bastion -> target hosts
           |
+          +---- local task events -> Ctrl+o i task ledger
           +---- Protocol Ink terminal / Neovim / Zellij
 
 Icinga 2 master -------------------------------> target hosts

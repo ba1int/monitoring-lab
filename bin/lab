@@ -628,6 +628,12 @@ verify_lab() {
         test -L "$HOME/.pi/agent/extensions/thinking-router"
         test "$(readlink "$HOME/.pi/agent/extensions/thinking-router")" = \
             /opt/pi-tools/extensions/thinking-router
+        test -L "$HOME/.pi/agent/extensions/task-ledger"
+        test "$(readlink "$HOME/.pi/agent/extensions/task-ledger")" = \
+            /opt/pi-tools/extensions/task-ledger
+        test -x "$HOME/.local/bin/pi-ledger"
+        test "$(readlink "$HOME/.local/bin/pi-ledger")" = \
+            /opt/pi-tools/bin/pi-ledger
         test -L "$HOME/.pi/agent/skills/incident-investigation"
         test "$(readlink "$HOME/.pi/agent/skills/incident-investigation")" = \
             /opt/pi-tools/skills/incident-investigation
