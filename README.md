@@ -174,8 +174,11 @@ Results live beneath `$MONITORING_LAB_STATE/benchmarks/model-matrix`. Matrix
 runs rotate candidate order between repeats to reduce order bias. Scenario
 truth and scorecards remain outside the workstation container.
 
-Model calls are intentionally serial. This keeps fixture state deterministic,
-avoids provider-side request bursts, and makes latency measurements comparable.
+The matrix defaults to two concurrent model runs, leaving headroom for one
+Codex task and one interactive Pi session. Per-host fixture locks let independent
+incident cases overlap while automatically serializing any cases that touch the
+same mock host. Use `--jobs 1` for a fully serial run; values above two are
+rejected deliberately.
 
 When score patterns change, re-evaluate saved sessions without another model
 call:

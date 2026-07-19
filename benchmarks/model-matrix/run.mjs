@@ -37,6 +37,7 @@ Usage: node run.mjs --profile screen|deep [options]
   --profile NAME          screen (6 candidates) or deep (12 candidates)
   --candidates LIST       Comma-separated MODEL:THINKING entries instead of a profile
   --repeats N             Repeat each candidate (default: 1)
+  --jobs N                Concurrent model runs: 1 or 2 (default: 2)
   --cases ID,ID           Forward a scenario selection to the suite
   --limit N               Forward a scenario limit to the suite
   --timeout-seconds N     Forward the per-scenario timeout
@@ -54,7 +55,7 @@ the default because it can be expensive.
 
 function parseArgs(argv) {
   const options = {
-    suite: "incidents", profile: null, candidates: null, repeats: 1,
+    suite: "incidents", profile: null, candidates: null, repeats: 1, jobs: 2,
     cases: null, limit: null, timeoutSeconds: null,
     outputRoot: DEFAULT_OUTPUT_ROOT, runId: null, dryRun: false,
     rescore: null,
@@ -71,6 +72,7 @@ function parseArgs(argv) {
       case "--profile": options.profile = value(); break;
       case "--candidates": options.candidates = value().split(",").filter(Boolean); break;
       case "--repeats": options.repeats = Number(value()); break;
+      case "--jobs": options.jobs = Number(value()); break;
       case "--cases": options.cases = value(); break;
       case "--limit": options.limit = Number(value()); break;
       case "--timeout-seconds": options.timeoutSeconds = Number(value()); break;
@@ -97,6 +99,9 @@ function parseArgs(argv) {
   if (options.profile && !PROFILES[options.profile]) throw new Error(`unknown profile ${options.profile}`);
   if (!Number.isInteger(options.repeats) || options.repeats < 1 || options.repeats > 10) {
     throw new Error("--repeats must be an integer from 1 to 10");
+  }
+  if (!Number.isInteger(options.jobs) || options.jobs < 1 || options.jobs > 2) {
+    throw new Error("--jobs must be 1 or 2; two benchmark workers reserve capacity for Codex and interactive Pi");
   }
   if (options.limit !== null && (!Number.isInteger(options.limit) || options.limit < 1)) {
     throw new Error("--limit must be a positive integer");
@@ -128,13 +133,32 @@ function run(command, args) {
   });
 }
 
-async function writeResults(outputDirectory, matrixId, suite, repeats, ledger) {
+async function mapLimit(items, concurrency, operation) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await operation(items[index], index);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, items.length) },
+    worker,
+  ));
+  return results;
+}
+
+async function writeResults(outputDirectory, matrixId, suite, repeats, ledger, jobs = 1) {
   const aggregate = aggregateMatrix(suite, ledger);
   const summary = {
     schema_version: "model-decision-matrix/1",
     run_id: matrixId,
     suite,
     repeats,
+    jobs,
     candidates: aggregate.candidates,
     runs: ledger.map(({ records, ...run }) => ({ ...run, record_count: records.length })),
   };
@@ -161,7 +185,9 @@ async function rescoreMatrix(options) {
     const child = JSON.parse(await readFile(savedRun.summaryPath, "utf8"));
     ledger.push({ ...savedRun, exitCode: result.code, records: child.records });
   }
-  await writeResults(outputDirectory, saved.run_id, saved.suite, saved.repeats, ledger);
+  await writeResults(
+    outputDirectory, saved.run_id, saved.suite, saved.repeats, ledger, saved.jobs ?? 1,
+  );
 }
 
 async function main() {
@@ -183,40 +209,47 @@ async function main() {
   const ledger = [];
   try {
     await mkdir(runsRoot, { recursive: true });
+    const plannedRuns = [];
     for (let repeat = 1; repeat <= options.repeats; repeat += 1) {
       const offset = (repeat - 1) % options.parsedCandidates.length;
       const candidates = options.parsedCandidates.slice(offset)
         .concat(options.parsedCandidates.slice(0, offset));
       for (const candidate of candidates) {
-        const childRunId = `${safeId(candidate)}-r${repeat}`;
-        const summaryPath = join(runsRoot, childRunId, "summary.json");
-        const args = [
-          runner, "--model", candidate.model, "--thinking", candidate.thinking,
-          "--output-root", runsRoot, "--run-id", childRunId,
-        ];
-        if (options.cases) args.push("--cases", options.cases);
-        if (options.limit !== null) args.push("--limit", String(options.limit));
-        if (options.timeoutSeconds !== null) args.push("--timeout-seconds", String(options.timeoutSeconds));
-        process.stdout.write(`matrix   ${candidate.id} repeat=${repeat}\n`);
-        if (options.dryRun) {
-          process.stdout.write(`dry-run  node ${args.join(" ")}\n`);
-          continue;
-        }
-        const result = await run(process.execPath, args);
-        let summary;
-        try {
-          summary = JSON.parse(await readFile(summaryPath, "utf8"));
-        } catch (error) {
-          throw new Error(`${candidate.id} repeat ${repeat} produced no readable summary: ${error.message}`);
-        }
-        ledger.push({
-          candidate, repeat, exitCode: result.code, signal: result.signal,
-          summaryPath, records: summary.records,
-        });
+        plannedRuns.push({ candidate, repeat });
       }
     }
+    const completed = await mapLimit(plannedRuns, options.jobs, async ({ candidate, repeat }) => {
+      const childRunId = `${safeId(candidate)}-r${repeat}`;
+      const summaryPath = join(runsRoot, childRunId, "summary.json");
+      const args = [
+        runner, "--model", candidate.model, "--thinking", candidate.thinking,
+        "--output-root", runsRoot, "--run-id", childRunId,
+      ];
+      if (options.cases) args.push("--cases", options.cases);
+      if (options.limit !== null) args.push("--limit", String(options.limit));
+      if (options.timeoutSeconds !== null) args.push("--timeout-seconds", String(options.timeoutSeconds));
+      process.stdout.write(`matrix   ${candidate.id} repeat=${repeat}\n`);
+      if (options.dryRun) {
+        process.stdout.write(`dry-run  node ${args.join(" ")}\n`);
+        return null;
+      }
+      const result = await run(process.execPath, args);
+      let summary;
+      try {
+        summary = JSON.parse(await readFile(summaryPath, "utf8"));
+      } catch (error) {
+        throw new Error(`${candidate.id} repeat ${repeat} produced no readable summary: ${error.message}`);
+      }
+      return {
+        candidate, repeat, exitCode: result.code, signal: result.signal,
+        summaryPath, records: summary.records,
+      };
+    });
+    ledger.push(...completed.filter(Boolean));
     if (options.dryRun) return;
-    await writeResults(outputDirectory, matrixId, options.suite, options.repeats, ledger);
+    await writeResults(
+      outputDirectory, matrixId, options.suite, options.repeats, ledger, options.jobs,
+    );
   } finally {
     await rm(lockDirectory, { recursive: true, force: true });
   }

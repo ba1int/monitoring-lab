@@ -7,12 +7,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { score } from "./scoring.mjs";
+import { acquireResourceLocks } from "../lib/resource-lock.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LAB_ROOT = join(ROOT, "..", "..");
 const STATE_ROOT = process.env.MONITORING_LAB_STATE
   ?? join(homedir(), ".local", "state", "monitoring-lab");
 const DEFAULT_OUTPUT_ROOT = join(STATE_ROOT, "benchmarks", "incidents");
+const FIXTURE_LOCK_ROOT = join(STATE_ROOT, "benchmarks", ".fixture-locks");
 const DOCKER_CONTEXT = process.env.INCIDENT_BENCH_DOCKER_CONTEXT ?? "";
 const COMPOSE_FILE = process.env.INCIDENT_BENCH_COMPOSE_FILE
   ?? join(LAB_ROOT, "compose.yaml");
@@ -313,6 +315,14 @@ async function runScenario({ manifest, fixtures }, context) {
   const containers = await resolveFixtureContainers(fixtures);
   const caseDirectory = join(outputDirectory, manifest.id);
   await mkdir(caseDirectory, { recursive: true });
+  const releaseLocks = await acquireResourceLocks(
+    FIXTURE_LOCK_ROOT,
+    fixtures.map((fixture) => fixture.host),
+    {
+      timeoutMs: (options.timeoutSeconds + 120) * 1_000,
+      label: `incident:${context.runId}:${manifest.id}`,
+    },
+  );
   const sessionRoot = `/home/operator/.local/state/monitoring-lab/incident-benchmark/${context.runId}/${manifest.id}`;
   let fixtureUnchanged = false;
   let sessionText = "";
@@ -382,7 +392,11 @@ async function runScenario({ manifest, fixtures }, context) {
     try {
       await cleanupFixtures(fixtures, containers, manifest.id);
     } finally {
-      await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+      try {
+        await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+      } finally {
+        await releaseLocks();
+      }
     }
   }
 
@@ -410,6 +424,11 @@ async function runScenario({ manifest, fixtures }, context) {
 
 async function verifyFixture({ manifest, fixtures }) {
   const containers = await resolveFixtureContainers(fixtures);
+  const releaseLocks = await acquireResourceLocks(
+    FIXTURE_LOCK_ROOT,
+    fixtures.map((fixture) => fixture.host),
+    { label: `incident-fixture:${manifest.id}` },
+  );
   try {
     for (const fixture of fixtures) {
       await verifyCleanBaseline(
@@ -425,7 +444,11 @@ async function verifyFixture({ manifest, fixtures }) {
       );
     }
   } finally {
-    await cleanupFixtures(fixtures, containers, manifest.id);
+    try {
+      await cleanupFixtures(fixtures, containers, manifest.id);
+    } finally {
+      await releaseLocks();
+    }
   }
 }
 
@@ -538,8 +561,9 @@ async function main() {
 
   const runId = options.runId ?? makeRunId();
   const outputDirectory = join(options.outputRoot, runId);
-  const lockDirectory = join(options.outputRoot, ".lock");
-  await mkdir(options.outputRoot, { recursive: true });
+  const lockRoot = join(options.outputRoot, ".locks");
+  const lockDirectory = join(lockRoot, runId);
+  await mkdir(lockRoot, { recursive: true });
   try {
     await mkdir(lockDirectory);
   } catch (error) {

@@ -6,12 +6,15 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { acquireResourceLocks } from "../lib/resource-lock.mjs";
+
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LAB_ROOT = join(ROOT, "..", "..");
 const COMMON = join(ROOT, "fixtures", "common");
 const STATE_ROOT = process.env.MONITORING_LAB_STATE
   ?? join(homedir(), ".local", "state", "monitoring-lab");
 const DEFAULT_OUTPUT_ROOT = join(STATE_ROOT, "benchmarks", "remote-dc-onboarding");
+const FIXTURE_LOCK_ROOT = join(STATE_ROOT, "benchmarks", ".fixture-locks");
 const DOCKER_CONTEXT = process.env.REMOTE_DC_BENCH_DOCKER_CONTEXT ?? "";
 const COMPOSE_FILE = process.env.REMOTE_DC_BENCH_COMPOSE_FILE ?? join(LAB_ROOT, "compose.yaml");
 const PROJECT_DIRECTORY = process.env.REMOTE_DC_BENCH_PROJECT_DIRECTORY ?? LAB_ROOT;
@@ -582,8 +585,16 @@ async function runScenario({ manifest }, context) {
   const { options, outputDirectory, runId, workstation } = context;
   const containers = await resolveContainers(manifest);
   const caseDirectory = join(outputDirectory, manifest.id);
-  const sessionRoot = `/home/operator/.local/state/monitoring-lab/remote-dc-benchmark/${runId}/${manifest.id}`;
   await mkdir(caseDirectory, { recursive: true });
+  const releaseLocks = await acquireResourceLocks(
+    FIXTURE_LOCK_ROOT,
+    Object.values(manifest.roles),
+    {
+      timeoutMs: (options.timeoutSeconds + 120) * 1_000,
+      label: `remote-dc:${runId}:${manifest.id}`,
+    },
+  );
+  const sessionRoot = `/home/operator/.local/state/monitoring-lab/remote-dc-benchmark/${runId}/${manifest.id}`;
   let sessionText = "";
   let piResult = null;
   const startedAt = Date.now();
@@ -637,20 +648,33 @@ async function runScenario({ manifest }, context) {
       await cleanupContainers(containers);
       await requireClean(containers);
     } finally {
-      await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+      try {
+        await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
+      } finally {
+        await releaseLocks();
+      }
     }
   }
 }
 
 async function verifyFixture({ manifest }) {
   const containers = await resolveContainers(manifest);
+  const releaseLocks = await acquireResourceLocks(
+    FIXTURE_LOCK_ROOT,
+    Object.values(manifest.roles),
+    { label: `remote-dc-fixture:${manifest.id}` },
+  );
   try {
     await requireClean(containers);
     await injectFixture(manifest, containers);
     await verifySeed(manifest, containers);
   } finally {
-    await cleanupContainers(containers);
-    await requireClean(containers);
+    try {
+      await cleanupContainers(containers);
+      await requireClean(containers);
+    } finally {
+      await releaseLocks();
+    }
   }
 }
 
@@ -768,8 +792,9 @@ async function main() {
   }
   const runId = options.runId ?? makeRunId();
   const outputDirectory = join(options.outputRoot, runId);
-  const lockDirectory = join(options.outputRoot, ".lock");
-  await mkdir(options.outputRoot, { recursive: true });
+  const lockRoot = join(options.outputRoot, ".locks");
+  const lockDirectory = join(lockRoot, runId);
+  await mkdir(lockRoot, { recursive: true });
   try { await mkdir(lockDirectory); }
   catch (error) {
     if (error.code === "EEXIST") throw new Error(`benchmark already running: ${lockDirectory}`);
