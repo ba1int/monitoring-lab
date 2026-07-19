@@ -1,0 +1,20 @@
+{
+  "id": "symlink-release-drift",
+  "description": "The active configuration symlink still targets the previous release while the intended release is already present.",
+  "host": "lab-prod-app01",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app01. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "symlink", "any": ["current\\.env", "symlink"] },
+      { "id": "active-release", "any": ["2026\\.07\\.18", "previous release", "old release"] },
+      { "id": "intended-release", "any": ["2026\\.07\\.19", "new release", "latest release"] },
+      { "id": "bad-value", "any": ["8081"] },
+      { "id": "good-value", "any": ["8080"] },
+      { "id": "fix", "any": ["repoint", "update.{0,30}(?:link|symlink)", "atomically.{0,30}(?:link|symlink)"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": { "max_remote_calls": 8, "max_cost_usd": 0.6, "max_elapsed_seconds": 420 }
+}

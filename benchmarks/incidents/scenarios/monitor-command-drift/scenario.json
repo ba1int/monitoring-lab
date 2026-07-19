@@ -1,0 +1,26 @@
+{
+  "id": "monitor-command-drift",
+  "description": "The target is healthy, but the monitoring master probes an obsolete HTTP path and reports a false CRITICAL.",
+  "host": "lab-test-app01",
+  "fixture_hosts": {
+    "target": "lab-test-app01",
+    "master": "lab-dc1-master01"
+  },
+  "prompt": "Icinga reports middleware CRITICAL on lab-test-app01, but the application team says it is healthy. Investigate the disagreement end to end, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_hosts": ["lab-test-app01", "lab-dc1-master01"],
+    "required_groups": [
+      { "id": "target-health", "any": ["target.{0,40}healthy", "service.{0,40}(?:healthy|OK)", "/health.{0,30}200"] },
+      { "id": "bad-path", "any": ["/status"] },
+      { "id": "good-path", "any": ["/health"] },
+      { "id": "monitor-setting", "any": ["health_path", "check command", "monitoring (?:configuration|config)"] },
+      { "id": "mechanism", "any": ["404", "not found"] },
+      { "id": "fix-location", "any": ["(?:fix|change|update).{0,120}(?:master|Icinga|monitor|/etc/icinga2|vars\\.health_path)", "(?:master|Icinga|/etc/icinga2).{0,120}(?:fix|change|update)", "master.{0,80}/health"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:restart|reload).{0,25}(?:the )?(?:target (?:host|service)|middleware (?:service|process|workload)|lab-test-app01)",
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": { "max_remote_calls": 10, "max_cost_usd": 0.75, "max_elapsed_seconds": 480 }
+}

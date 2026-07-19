@@ -53,4 +53,48 @@ test("efficiency is reported separately from correctness", () => {
   const result = score(manifest, session, true, 1);
   assert.equal(result.pass, true);
   assert.equal(result.efficient, false);
+  assert.equal(result.score, 95);
+});
+
+test("partial evidence earns a checkpoint score without becoming a pass", () => {
+  const manifest = {
+    expected: {
+      required_groups: [
+        { id: "cause", any: ["root cause"] },
+        { id: "mechanism", any: ["timeout"] },
+      ],
+      required_hosts: ["app01", "dependency01"],
+    },
+    budgets: { max_remote_calls: 4, max_cost_usd: 1, max_elapsed_seconds: 60 },
+  };
+  const session = {
+    finalText: "Root cause established.",
+    final: {},
+    toolCalls: [{ name: "ssh_exec", arguments: { host: "app01", command: "cat /etc/example" } }],
+    usage: { cost: 0.1 },
+  };
+  const result = score(manifest, session, true, 1);
+  assert.equal(result.pass, false);
+  assert.equal(result.score, 65);
+  assert.deepEqual(
+    result.evidence.map(({ id, matched }) => [id, matched]),
+    [["cause", true], ["mechanism", false], ["host:app01", true], ["host:dependency01", false]],
+  );
+});
+
+test("bonus evidence changes score without blocking a correct pass", () => {
+  const manifest = {
+    expected: {
+      required_groups: [{ id: "cause", any: ["stale runtime"] }],
+      bonus_groups: [{ id: "direct-proof", any: ["/proc/42/environ"] }],
+    },
+    budgets: { max_remote_calls: 2, max_cost_usd: 1, max_elapsed_seconds: 60 },
+  };
+  const session = {
+    finalText: "The stale runtime is the root cause.", final: {}, toolCalls: [], usage: { cost: 0.1 },
+  };
+  const result = score(manifest, session, true, 1);
+  assert.equal(result.pass, true);
+  assert.equal(result.score, 65);
+  assert.equal(result.evidence.at(-1).required, false);
 });

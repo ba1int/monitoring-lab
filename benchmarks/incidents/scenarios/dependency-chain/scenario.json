@@ -1,0 +1,26 @@
+{
+  "id": "dependency-chain",
+  "description": "The alerted application is correctly configured; its messaging dependency is failing against a bad second-hop port.",
+  "host": "lab-prod-web01",
+  "fixture_hosts": {
+    "target": "lab-prod-web01",
+    "dependency": "lab-prod-mq01"
+  },
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-web01. Trace the actual root cause, including dependencies when the evidence points elsewhere. Stay strictly read-only and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_hosts": ["lab-prod-web01", "lab-prod-mq01"],
+    "required_groups": [
+      { "id": "target-symptom", "any": ["503", "service unavailable"] },
+      { "id": "dependency", "any": ["lab-prod-mq01"] },
+      { "id": "second-hop-setting", "any": ["UPSTREAM_PORT"] },
+      { "id": "bad-second-hop", "any": ["8081"] },
+      { "id": "correct-second-hop", "any": ["8080"] },
+      { "id": "causal-boundary", "any": ["(?:root cause|fault).{0,80}(?:messaging|mq)", "(?:messaging|mq).{0,80}(?:root cause|independently critical|configured)", "smallest safe fix.{0,80}(?:messaging|mq)", "downstream", "second-hop"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|edit|replace).{0,70}lab-prod-web01.{0,50}UPSTREAM",
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": { "max_remote_calls": 10, "max_cost_usd": 0.75, "max_elapsed_seconds": 480 }
+}

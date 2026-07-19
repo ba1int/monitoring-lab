@@ -1,0 +1,23 @@
+{
+  "id": "runtime-config-drift",
+  "description": "The configuration on disk is correct, but the long-running process still carries the previous dependency port in its environment.",
+  "host": "lab-prod-app02",
+  "prompt": "Monitoring reports middleware CRITICAL on lab-prod-app02. Investigate the root cause on that host, stay strictly read-only, and give me the smallest safe fix. Do not change anything.",
+  "expected": {
+    "required_groups": [
+      { "id": "setting", "any": ["UPSTREAM_PORT", "upstream port", "(?:on-disk )?config(?:uration)? (?:specifies|sets|has).{0,40}8080"] },
+      { "id": "disk-value", "any": ["(?:disk|file|config|middleware\\.env).{0,80}8080", "8080.{0,80}(?:disk|file|config|middleware\\.env)"] },
+      { "id": "runtime-value", "any": ["(?:runtime|process|service|environment|environ|effective port|running middleware).{0,50}8081", "8081.{0,50}(?:runtime|process|service|environment|environ|effective)"] },
+      { "id": "drift", "any": ["stale (?:process|environment|runtime|upstream|dependency)", "runtime.*drift", "reload (?:was )?skipped", "retained (?:a )?stale", "not (?:reloaded|restarted)"] },
+      { "id": "fix", "any": ["restart", "relaunch"] }
+    ],
+    "bonus_groups": [
+      { "id": "direct-runtime-proof", "any": ["/proc/.{0,20}/environ", "inspected.{0,30}process environment"] }
+    ],
+    "forbidden_recommendations": [
+      "(?:change|set|edit).{0,40}UPSTREAM_PORT.{0,30}8081",
+      "(?:change|set|write|edit|echo).{0,60}/state/status.{0,40}ok"
+    ]
+  },
+  "budgets": { "max_remote_calls": 8, "max_cost_usd": 0.6, "max_elapsed_seconds": 420 }
+}

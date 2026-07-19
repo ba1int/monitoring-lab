@@ -106,6 +106,7 @@ lab benchmark incidents --static-only
 lab benchmark incidents
 lab benchmark remote-dc-onboarding --static-only
 lab benchmark remote-dc-onboarding
+lab benchmark model-matrix --profile screen --cases runtime-config-drift
 lab down
 lab reset --yes
 ```
@@ -126,8 +127,10 @@ The report records root-cause evidence, unsafe or mutating behavior, SSH call
 count, elapsed time, and model cost. Results are written beneath
 `$MONITORING_LAB_STATE/benchmarks/incidents`. The suite covers hidden bytes,
 permissions, configuration precedence, environment and protocol mismatches,
-wrong endpoints, and stale evidence. Useful focused and comparative runs
-include:
+wrong endpoints, stale evidence, runtime-versus-disk drift, release symlinks,
+cross-host dependency chains, and monitoring-command drift. Incident results
+retain pass/fail for strict correctness and also award up to 100 checkpoint
+points so partial diagnosis remains visible. Useful focused runs include:
 
 ```sh
 lab benchmark incidents --cases hidden-cr
@@ -140,6 +143,46 @@ lab benchmark incidents --thinking xhigh --run-id xhigh
 `high` is the intentional routine default. Treat `xhigh` as a candidate to
 benchmark against the same cases, not an automatic upgrade: additional
 reasoning is useful only when it produces a measurable correctness gain.
+
+## Model decision matrix
+
+`lab benchmark model-matrix` runs identical scenarios across explicit model and
+thinking candidates. It reports average and minimum checkpoint score, variance,
+strict success, safety, completion, remote calls, cost, and latency. A Pareto
+marker identifies candidates that are not simultaneously beaten on quality,
+safety, cost, and time; it is a shortlist rather than an automatic winner.
+
+Start with one pass over the four discrimination cases:
+
+```sh
+CASES=runtime-config-drift,symlink-release-drift,dependency-chain,monitor-command-drift
+lab benchmark model-matrix --profile screen --cases "$CASES" --run-id screen-01
+```
+
+The `screen` profile compares Luna, Terra, and Sol at low and high. The `deep`
+profile expands all three families across low, medium, high, and xhigh; it is
+deliberately opt-in because twelve candidates over a full suite is expensive.
+After screening, repeat only the non-dominated candidates three times:
+
+```sh
+lab benchmark model-matrix \
+  --candidates openai-codex/gpt-5.6-luna:low,openai-codex/gpt-5.6-terra:high,openai-codex/gpt-5.6-sol:high \
+  --cases "$CASES" --repeats 3 --run-id confirm-01
+```
+
+Results live beneath `$MONITORING_LAB_STATE/benchmarks/model-matrix`. Matrix
+runs rotate candidate order between repeats to reduce order bias. Scenario
+truth and scorecards remain outside the workstation container.
+
+Model calls are intentionally serial. This keeps fixture state deterministic,
+avoids provider-side request bursts, and makes latency measurements comparable.
+
+When score patterns change, re-evaluate saved sessions without another model
+call:
+
+```sh
+lab benchmark model-matrix --rescore screen-01
+```
 
 ## Remote-datacenter onboarding benchmark
 

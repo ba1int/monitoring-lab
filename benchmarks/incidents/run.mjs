@@ -32,6 +32,7 @@ Usage: node run.mjs [options]
   --timeout-seconds N     Per-scenario Pi timeout (default: 300)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
+  --rescore RUN_ID        Re-evaluate saved answer/tool checkpoints without Pi
   --static-only           Validate fixtures without Docker or model calls
   --fixtures-only         Inject, verify, and clean fixtures without model calls
   --help                  Show this help
@@ -47,6 +48,7 @@ function parseArgs(argv) {
     timeoutSeconds: 300,
     outputRoot: DEFAULT_OUTPUT_ROOT,
     runId: null,
+    rescore: null,
     staticOnly: false,
     fixturesOnly: false,
   };
@@ -80,6 +82,9 @@ function parseArgs(argv) {
       case "--run-id":
         options.runId = value();
         break;
+      case "--rescore":
+        options.rescore = value();
+        break;
       case "--static-only":
         options.staticOnly = true;
         break;
@@ -106,8 +111,15 @@ function parseArgs(argv) {
   if (options.runId && !/^[a-zA-Z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, digits, dot, underscore, and dash");
   }
+  if (options.rescore && !/^[a-zA-Z0-9._-]+$/.test(options.rescore)) {
+    throw new Error("--rescore may contain only letters, digits, dot, underscore, and dash");
+  }
   if (options.staticOnly && options.fixturesOnly) {
     throw new Error("--static-only and --fixtures-only are mutually exclusive");
+  }
+  if (options.rescore && (options.staticOnly || options.fixturesOnly || options.runId
+      || options.cases || options.limit !== null)) {
+    throw new Error("--rescore cannot be combined with selection, fixture, static, or run-id options");
   }
   return options;
 }
@@ -192,6 +204,7 @@ async function verifyCleanBaseline(container, context) {
 [[ "$(cat /state/status)" == "ok" ]]
 [[ ! -e /etc/lab-middleware ]]
 [[ ! -e /var/log/lab-middleware ]]
+[[ ! -e /opt/lab-middleware ]]
 `, context);
 }
 
@@ -235,14 +248,30 @@ async function loadScenarios(options) {
     const directory = join(scenariosRoot, name);
     const manifest = JSON.parse(await readFile(join(directory, "scenario.json"), "utf8"));
     if (manifest.id !== name) throw new Error(`${name}: manifest id mismatch`);
-    for (const script of ["inject.sh", "verify.sh", "cleanup.sh"]) {
-      await readFile(join(directory, script), "utf8");
+    const fixtureHosts = manifest.fixture_hosts ?? { target: manifest.host };
+    if (fixtureHosts.target !== manifest.host) {
+      throw new Error(`${name}: fixture_hosts.target must match host`);
+    }
+    const fixtures = [];
+    for (const [role, host] of Object.entries(fixtureHosts)) {
+      if (!/^[a-z][a-z0-9-]*$/.test(role)) throw new Error(`${name}: invalid fixture role ${role}`);
+      const suffix = manifest.fixture_hosts ? `-${role}` : "";
+      const fixture = { role, host };
+      for (const action of ["inject", "verify", "cleanup"]) {
+        fixture[action] = await readFile(join(directory, `${action}${suffix}.sh`), "utf8");
+      }
+      fixtures.push(fixture);
     }
     if (!Array.isArray(manifest.expected?.required_groups)
       || manifest.expected.required_groups.length === 0) {
       throw new Error(`${name}: expected.required_groups is required`);
     }
-    scenarios.push({ directory, manifest });
+    if (manifest.expected.required_hosts?.some(
+      (host) => !Object.values(fixtureHosts).includes(host),
+    )) {
+      throw new Error(`${name}: expected.required_hosts must reference fixture hosts`);
+    }
+    scenarios.push({ directory, manifest, fixtures });
   }
   if (options.cases) {
     const found = new Set(scenarios.map(({ manifest }) => manifest.id));
@@ -253,14 +282,37 @@ async function loadScenarios(options) {
   return scenarios;
 }
 
-async function runScenario({ directory, manifest }, context) {
+async function resolveFixtureContainers(fixtures) {
+  const pairs = await Promise.all(fixtures.map(async (fixture) => [
+    fixture.role,
+    await containerId(fixture.host),
+  ]));
+  return Object.fromEntries(pairs);
+}
+
+async function cleanupFixtures(fixtures, containers, scenario) {
+  let firstError = null;
+  for (const fixture of [...fixtures].reverse()) {
+    try {
+      await execScript(
+        containers[fixture.role], fixture.cleanup,
+        `${scenario}: cleanup ${fixture.role}`,
+      );
+      await verifyCleanBaseline(
+        containers[fixture.role], `${scenario}: verify cleanup ${fixture.role}`,
+      );
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError) throw firstError;
+}
+
+async function runScenario({ manifest, fixtures }, context) {
   const { options, outputDirectory, workstation } = context;
-  const target = await containerId(manifest.host);
+  const containers = await resolveFixtureContainers(fixtures);
   const caseDirectory = join(outputDirectory, manifest.id);
   await mkdir(caseDirectory, { recursive: true });
-  const inject = await readFile(join(directory, "inject.sh"), "utf8");
-  const verify = await readFile(join(directory, "verify.sh"), "utf8");
-  const cleanup = await readFile(join(directory, "cleanup.sh"), "utf8");
   const sessionRoot = `/home/operator/.local/state/monitoring-lab/incident-benchmark/${context.runId}/${manifest.id}`;
   let fixtureUnchanged = false;
   let sessionText = "";
@@ -268,8 +320,19 @@ async function runScenario({ directory, manifest }, context) {
   const startedAt = Date.now();
 
   try {
-    await execScript(target, inject, `${manifest.id}: inject`);
-    await execScript(target, verify, `${manifest.id}: verify injection`);
+    for (const fixture of fixtures) {
+      await verifyCleanBaseline(
+        containers[fixture.role], `${manifest.id}: require clean ${fixture.role}`,
+      );
+      await execScript(
+        containers[fixture.role], fixture.inject,
+        `${manifest.id}: inject ${fixture.role}`,
+      );
+      await execScript(
+        containers[fixture.role], fixture.verify,
+        `${manifest.id}: verify injection ${fixture.role}`,
+      );
+    }
 
     const piArgs = [
       "exec", "-w", "/home/operator",
@@ -307,15 +370,17 @@ async function runScenario({ directory, manifest }, context) {
     sessionText = sessionResult.stdout;
     await writeFile(join(caseDirectory, "session.jsonl"), sessionText);
 
-    const verifyResult = await docker(
-      ["exec", "-i", "--user", "root", target, "/bin/bash", "-se"],
-      { input: verify, timeoutMs: 30_000 },
-    );
-    fixtureUnchanged = verifyResult.code === 0;
+    const unchanged = await Promise.all(fixtures.map(async (fixture) => {
+      const result = await docker(
+        ["exec", "-i", "--user", "root", containers[fixture.role], "/bin/bash", "-se"],
+        { input: fixture.verify, timeoutMs: 30_000 },
+      );
+      return result.code === 0;
+    }));
+    fixtureUnchanged = unchanged.every(Boolean);
   } finally {
     try {
-      await execScript(target, cleanup, `${manifest.id}: cleanup`);
-      await verifyCleanBaseline(target, `${manifest.id}: verify cleanup`);
+      await cleanupFixtures(fixtures, containers, manifest.id);
     } finally {
       await docker(["exec", workstation, "rm", "-rf", "--", sessionRoot]);
     }
@@ -343,18 +408,24 @@ async function runScenario({ directory, manifest }, context) {
   return record;
 }
 
-async function verifyFixture({ directory, manifest }) {
-  const target = await containerId(manifest.host);
-  const inject = await readFile(join(directory, "inject.sh"), "utf8");
-  const verify = await readFile(join(directory, "verify.sh"), "utf8");
-  const cleanup = await readFile(join(directory, "cleanup.sh"), "utf8");
+async function verifyFixture({ manifest, fixtures }) {
+  const containers = await resolveFixtureContainers(fixtures);
   try {
-    await verifyCleanBaseline(target, `${manifest.id}: require clean baseline`);
-    await execScript(target, inject, `${manifest.id}: inject`);
-    await execScript(target, verify, `${manifest.id}: verify injection`);
+    for (const fixture of fixtures) {
+      await verifyCleanBaseline(
+        containers[fixture.role], `${manifest.id}: require clean ${fixture.role}`,
+      );
+      await execScript(
+        containers[fixture.role], fixture.inject,
+        `${manifest.id}: inject ${fixture.role}`,
+      );
+      await execScript(
+        containers[fixture.role], fixture.verify,
+        `${manifest.id}: verify injection ${fixture.role}`,
+      );
+    }
   } finally {
-    await execScript(target, cleanup, `${manifest.id}: cleanup`);
-    await verifyCleanBaseline(target, `${manifest.id}: verify cleanup`);
+    await cleanupFixtures(fixtures, containers, manifest.id);
   }
 }
 
@@ -366,12 +437,12 @@ function renderReport(runId, records) {
     `Run: \`${runId}\``,
     `Correctness: **${passed}/${records.length} passed**`,
     "",
-    "| Scenario | Result | Root cause | Read-only | SSH calls | Cost | Time |",
-    "|---|---:|---:|---:|---:|---:|---:|",
+    "| Scenario | Score | Result | Root cause | Read-only | SSH calls | Cost | Time |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const record of records) {
     lines.push(
-      `| ${record.scenario} | ${record.scoring.pass ? "PASS" : "FAIL"} | ${record.scoring.rootCause ? "yes" : "no"} | ${record.scoring.readOnly ? "yes" : "no"} | ${record.scoring.remoteCalls} | $${record.usage.cost.toFixed(3)} | ${(record.elapsed_ms / 1000).toFixed(1)}s |`,
+      `| ${record.scenario} | ${record.scoring.score}/100 | ${record.scoring.pass ? "PASS" : "FAIL"} | ${record.scoring.rootCause ? "yes" : "no"} | ${record.scoring.readOnly ? "yes" : "no"} | ${record.scoring.remoteCalls} | $${record.usage.cost.toFixed(3)} | ${(record.elapsed_ms / 1000).toFixed(1)}s |`,
     );
   }
   for (const record of records) {
@@ -384,10 +455,82 @@ function makeRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+async function rescoreExisting(scenarios, options) {
+  const outputDirectory = join(options.outputRoot, options.rescore);
+  const records = [];
+  for (const { manifest } of scenarios) {
+    const caseDirectory = join(outputDirectory, manifest.id);
+    let prior;
+    let sessionText;
+    try {
+      prior = JSON.parse(await readFile(join(caseDirectory, "result.json"), "utf8"));
+      sessionText = await readFile(join(caseDirectory, "session.jsonl"), "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    const session = parseSession(sessionText);
+    const scoring = score(manifest, session, prior.fixture_unchanged, prior.elapsed_ms);
+    const record = { ...prior, scoring, final_text: session.finalText };
+    records.push(record);
+    await writeFile(join(caseDirectory, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+  }
+  if (records.length === 0) throw new Error(`no saved scenarios found in ${outputDirectory}`);
+  await writeFile(join(outputDirectory, "REPORT.md"), renderReport(options.rescore, records));
+  await writeFile(
+    join(outputDirectory, "summary.json"),
+    `${JSON.stringify({ schema_version: "incident-benchmark-summary/1", run_id: options.rescore, records }, null, 2)}\n`,
+  );
+  process.stdout.write(`rescored ${records.length} incident scenarios in ${outputDirectory}\n`);
+}
+
+function failedRecord(scenario, error) {
+  return {
+    schema_version: "incident-benchmark/1",
+    scenario: scenario.manifest.id,
+    description: scenario.manifest.description,
+    host: scenario.manifest.host,
+    elapsed_ms: null,
+    fixture_unchanged: null,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 },
+    scoring: {
+      pass: false, score: 0, maxScore: 100, completed: false, rootCause: false, readOnly: false,
+      safeRecommendation: false, efficient: false, evidence: [],
+      unsafeText: null, mutatingCall: null, remoteCalls: 0,
+    },
+    final_text: "",
+    error: error.stack ?? String(error),
+  };
+}
+
+async function executeScenario(scenario, context) {
+  process.stdout.write(`incident ${scenario.manifest.id}: running\n`);
+  try {
+    const record = await runScenario(scenario, context);
+    process.stdout.write(
+      `incident ${record.scenario}: ${record.scoring.score}/100 ${record.scoring.pass ? "PASS" : "FAIL"} calls=${record.scoring.remoteCalls} cost=$${record.usage.cost.toFixed(3)} time=${(record.elapsed_ms / 1000).toFixed(1)}s\n`,
+    );
+    return record;
+  } catch (error) {
+    const record = failedRecord(scenario, error);
+    await mkdir(join(context.outputDirectory, record.scenario), { recursive: true });
+    await writeFile(
+      join(context.outputDirectory, record.scenario, "result.json"),
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+    process.stdout.write(`incident ${record.scenario}: ERROR ${error.message}\n`);
+    return record;
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scenarios = await loadScenarios(options);
   if (scenarios.length === 0) throw new Error("no scenarios selected");
+  if (options.rescore) {
+    await rescoreExisting(scenarios, options);
+    return;
+  }
   if (options.staticOnly) {
     process.stdout.write(`validated ${scenarios.length} incident scenarios\n`);
     return;
@@ -416,40 +559,9 @@ async function main() {
     const workstation = await containerId("workstation");
     await mkdir(outputDirectory, { recursive: true });
     for (const scenario of scenarios) {
-      process.stdout.write(`incident ${scenario.manifest.id}: running\n`);
-      try {
-        const record = await runScenario(scenario, {
-          options, outputDirectory, runId, workstation,
-        });
-        records.push(record);
-        process.stdout.write(
-          `incident ${record.scenario}: ${record.scoring.pass ? "PASS" : "FAIL"} calls=${record.scoring.remoteCalls} cost=$${record.usage.cost.toFixed(3)} time=${(record.elapsed_ms / 1000).toFixed(1)}s\n`,
-        );
-      } catch (error) {
-        const record = {
-          schema_version: "incident-benchmark/1",
-          scenario: scenario.manifest.id,
-          description: scenario.manifest.description,
-          host: scenario.manifest.host,
-          elapsed_ms: null,
-          fixture_unchanged: null,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 },
-          scoring: {
-            pass: false, completed: false, rootCause: false, readOnly: false,
-            safeRecommendation: false, efficient: false, evidence: [],
-            unsafeText: null, mutatingCall: null, remoteCalls: 0,
-          },
-          final_text: "",
-          error: error.stack ?? String(error),
-        };
-        records.push(record);
-        await mkdir(join(outputDirectory, record.scenario), { recursive: true });
-        await writeFile(
-          join(outputDirectory, record.scenario, "result.json"),
-          `${JSON.stringify(record, null, 2)}\n`,
-        );
-        process.stdout.write(`incident ${record.scenario}: ERROR ${error.message}\n`);
-      }
+      records.push(await executeScenario(
+        scenario, { options, outputDirectory, runId, workstation },
+      ));
     }
     const report = renderReport(runId, records);
     await writeFile(join(outputDirectory, "REPORT.md"), report);
