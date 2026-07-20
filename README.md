@@ -21,6 +21,7 @@ The workstation contains:
 - the mounted Study Room for terminal-native operational lessons;
 - the repository-owned stateless `ssh_exec` tool;
 - the repository-owned zero-token low/high thinking router;
+- the repository-owned native-compaction context sentinel;
 - the repository-owned zero-token task ledger and Zellij viewer;
 - the generic `incident-investigation` reasoning skill; and
 - the lab-only `lab-middleware-health` and `lab-host-onboarding` test skills.

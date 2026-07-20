@@ -668,6 +668,9 @@ verify_lab() {
         test -L "$HOME/.pi/agent/extensions/thinking-router"
         test "$(readlink "$HOME/.pi/agent/extensions/thinking-router")" = \
             /opt/pi-tools/extensions/thinking-router
+        test -L "$HOME/.pi/agent/extensions/context-sentinel"
+        test "$(readlink "$HOME/.pi/agent/extensions/context-sentinel")" = \
+            /opt/pi-tools/extensions/context-sentinel
         test -L "$HOME/.pi/agent/extensions/task-ledger"
         test "$(readlink "$HOME/.pi/agent/extensions/task-ledger")" = \
             /opt/pi-tools/extensions/task-ledger
