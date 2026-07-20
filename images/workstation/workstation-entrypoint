@@ -5,6 +5,7 @@ umask 077
 
 readonly DOTFILES_ROOT="${MONITORING_LAB_DOTFILES_ROOT:-/opt/dotfiles}"
 readonly PI_TOOLS_ROOT="${MONITORING_LAB_PI_TOOLS_ROOT:-/opt/pi-tools}"
+readonly STUDY_ROOM_ROOT="${MONITORING_LAB_STUDY_ROOM_ROOT:-/opt/study-room}"
 readonly LAB_SKILLS_ROOT="${MONITORING_LAB_SKILLS_ROOT:-/opt/monitoring-lab/skills}"
 readonly INVENTORY_FILE="${MONITORING_LAB_INVENTORY:-/opt/monitoring-lab/inventory/hosts.tsv}"
 readonly KEY_SOURCE="${MONITORING_LAB_KEY_SOURCE:-/run/secrets/lab_ssh_key}"
@@ -99,6 +100,8 @@ main() {
         || die "dotfiles are not mounted at $DOTFILES_ROOT"
     [[ -x "$PI_TOOLS_ROOT/install.sh" ]] \
         || die "pi-tools is not mounted at $PI_TOOLS_ROOT"
+    [[ -x "$STUDY_ROOM_ROOT/install.sh" ]] \
+        || die "Study Room is not mounted at $STUDY_ROOM_ROOT"
     [[ -r "$INVENTORY_FILE" ]] \
         || die "inventory is not mounted at $INVENTORY_FILE"
     [[ -s "$KEY_SOURCE" ]] \
@@ -120,10 +123,13 @@ main() {
     log "installing Pi with repository-owned tools only"
     NPM_CONFIG_CACHE=/tmp/npm-cache \
         "$PI_TOOLS_ROOT/install.sh"
+
+    log "installing the mounted Study Room"
+    "$STUDY_ROOM_ROOT/install.sh"
     link_lab_skills
 
-    printf 'ubuntu-24.04 bash pi owned-tools lab-skills\n' > "$READY_FILE"
-    log "Ubuntu workstation ready with calibrated Pi tools"
+    printf 'ubuntu-24.04 bash pi owned-tools study-room lab-skills\n' > "$READY_FILE"
+    log "Ubuntu workstation ready with calibrated Pi tools and Study Room"
     exec "$@"
 }
 

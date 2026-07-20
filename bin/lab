@@ -18,6 +18,7 @@ LAB_DOCKER_CONTEXT="${MONITORING_LAB_DOCKER_CONTEXT:-}"
 COMPOSE_FLAVOR=""
 DOTFILES_DIR=""
 PI_TOOLS_DIR=""
+STUDY_ROOM_DIR=""
 
 usage() {
     cat <<'EOF'
@@ -119,6 +120,33 @@ resolve_pi_tools() {
     die "pi-tools was not found; clone it beside monitoring-lab or set MONITORING_LAB_PI_TOOLS"
 }
 
+resolve_study_room() {
+    local candidate
+    local -a candidates
+
+    if [[ -n "${MONITORING_LAB_STUDY_ROOM:-}" ]]; then
+        candidates=("$MONITORING_LAB_STUDY_ROOM")
+    else
+        candidates=(
+            "$HOME/study-room"
+            "$HOME/Documents/study-room"
+            "$LAB_ROOT/../study-room"
+        )
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        [[ -d "$candidate" && -x "$candidate/install.sh" ]] || continue
+        STUDY_ROOM_DIR="$(CDPATH= cd -- "$candidate" && pwd -P)"
+        export MONITORING_LAB_STUDY_ROOM="$STUDY_ROOM_DIR"
+        return
+    done
+
+    if [[ -n "${MONITORING_LAB_STUDY_ROOM:-}" ]]; then
+        die "MONITORING_LAB_STUDY_ROOM does not contain install.sh: $MONITORING_LAB_STUDY_ROOM"
+    fi
+    die "Study Room was not found; clone it beside monitoring-lab or set MONITORING_LAB_STUDY_ROOM"
+}
+
 docker_cli() {
     if [[ -n "$LAB_DOCKER_CONTEXT" ]]; then
         docker --context "$LAB_DOCKER_CONTEXT" "$@"
@@ -181,6 +209,7 @@ compose() {
 prepare_runtime() {
     resolve_dotfiles
     resolve_pi_tools
+    resolve_study_room
     ensure_runtime
     select_compose
 }
@@ -645,6 +674,12 @@ verify_lab() {
         test -x "$HOME/.local/bin/pi-ledger"
         test "$(readlink "$HOME/.local/bin/pi-ledger")" = \
             /opt/pi-tools/bin/pi-ledger
+        test -x "$HOME/.local/bin/study"
+        test "$(readlink "$HOME/.local/bin/study")" = \
+            /opt/study-room/bin/study
+        test -L "$HOME/.pi/agent/extensions/study-learn-emit"
+        test "$(readlink "$HOME/.pi/agent/extensions/study-learn-emit")" = \
+            /opt/study-room/pi/learn-emit
         test -L "$HOME/.pi/agent/skills/incident-investigation"
         test "$(readlink "$HOME/.pi/agent/skills/incident-investigation")" = \
             /opt/pi-tools/skills/incident-investigation
@@ -670,6 +705,8 @@ verify_lab() {
         printf "%s\n" "$rpc_state" \
             | jq -e '"'"'.type == "response" and .success == true'"'"' >/dev/null
         (cd /opt/pi-tools && npm test >/dev/null)
+        (cd /opt/study-room && ./tests/smoke.sh >/dev/null)
+        study doctor >/dev/null
         nvim --headless "+colorscheme protocol-ink" \
             "+if !empty(v:errmsg) | cquit 1 | endif" "+qall"
         zellij --config "$HOME/.config/zellij/config.kdl" \

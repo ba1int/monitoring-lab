@@ -288,6 +288,12 @@ services:
         bind:
           create_host_path: false
       - type: bind
+        source: ${MONITORING_LAB_STUDY_ROOM}
+        target: /opt/study-room
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ./inventory/hosts.tsv
         target: /opt/monitoring-lab/inventory/hosts.tsv
         read_only: true

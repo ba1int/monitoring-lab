@@ -18,6 +18,7 @@ The workstation contains:
 - Ubuntu 24.04 and Bash 5.2;
 - the mounted Protocol Ink dotfiles for shell, Neovim, and Zellij;
 - Pi pinned by the mounted `pi-tools` repository;
+- the mounted Study Room for terminal-native operational lessons;
 - the repository-owned stateless `ssh_exec` tool;
 - the repository-owned zero-token low/high thinking router;
 - the repository-owned zero-token task ledger and Zellij viewer;
@@ -294,17 +295,19 @@ export MONITORING_LAB_STATE="$HOME/.local/state/monitoring-lab"
 export MONITORING_LAB_DOCKER_CONTEXT=my-context
 export MONITORING_LAB_DOTFILES="$HOME/dotfiles"
 export MONITORING_LAB_PI_TOOLS="$HOME/pi-tools"
+export MONITORING_LAB_STUDY_ROOM="$HOME/study-room"
 ```
 
-The launcher discovers `dotfiles` and `pi-tools` in normal home/Documents
-locations or beside this repository. Explicit overrides win.
+The launcher discovers `dotfiles`, `pi-tools`, and `study-room` in normal
+home/Documents locations or beside this repository. Explicit overrides win.
 
 ## Isolation notes
 
-The workstation has a named persistent home volume. Dotfiles and `pi-tools` are
-mounted read-only under `/opt`. No personal SSH key, Docker socket, privileged
-container, host networking, or host home directory is mounted. The workstation
-drops Linux capabilities and uses a read-only root filesystem.
+The workstation has a named persistent home volume. Dotfiles, `pi-tools`, and
+`study-room` are mounted read-only under `/opt`. No personal SSH key, Docker
+socket, privileged container, host networking, or host home directory is
+mounted. The workstation drops Linux capabilities and uses a read-only root
+filesystem.
 
 The environment reproduces Ubuntu userland, Bash, SSH, Neovim, Zellij, and the
 agent installation. It does not emulate `wsl.exe`, PowerShell integration,

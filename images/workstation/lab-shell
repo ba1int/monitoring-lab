@@ -11,6 +11,7 @@ MONITORING LAB // ISOLATED WORKSTATION
 USERLAND      Ubuntu 24.04 LTS
 SHELL         Bash 5.2 (login shell)
 DOTFILES      /opt/dotfiles (read-only source)
+STUDY ROOM    study  (read-only source: /opt/study-room)
 DIRECT SSH    ssh lab-prod-app01
 AGENT         pi  (ssh-direct + auto low/high thinking; /login once)
 LAB SKILLS    lab-middleware-health, lab-host-onboarding
