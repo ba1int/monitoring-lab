@@ -657,6 +657,8 @@ verify_lab() {
         test "$(uname -s)" = Linux
         test "$(node --version)" = "v22.19.0"
         test "$(pi --version)" = "0.80.10"
+        pi_runtime="$HOME/.local/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js"
+        grep -q "pi-tools:inline-compaction:v1" "$pi_runtime"
         test "$(nvim --version | head -n 1)" = "NVIM v0.12.4"
         test "$(zellij --version)" = "zellij 0.44.3"
         fzf --version | grep -q "^0.72.0 "
@@ -698,7 +700,12 @@ verify_lab() {
             /opt/monitoring-lab/skills/lab-host-onboarding
         grep -q "^name: lab-host-onboarding$" \
             "$HOME/.pi/agent/skills/lab-host-onboarding/SKILL.md"
-        jq -e '"'"'has("packages") | not'"'"' "$HOME/.pi/agent/settings.json" >/dev/null
+        jq -e '"'"'
+            (has("packages") | not) and
+            .compaction.enabled == true and
+            .compaction.reserveTokens == 68000 and
+            .compaction.keepRecentTokens == 20000
+        '"'"' "$HOME/.pi/agent/settings.json" >/dev/null
         test ! -e "$HOME/.pi/agent/extensions/protocol-ops"
         for removed_tool in hop peek kb pulse pi-safe; do
             ! command -v "$removed_tool" >/dev/null 2>&1
