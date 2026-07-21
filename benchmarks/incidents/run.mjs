@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { score } from "./scoring.mjs";
 import { acquireResourceLocks } from "../lib/resource-lock.mjs";
+import { profileArgs, profileEnvironment, profileNames } from "../lib/pi-stack-profile.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LAB_ROOT = join(ROOT, "..", "..");
@@ -31,6 +32,7 @@ Usage: node run.mjs [options]
   --limit N               Run only the first N selected scenarios
   --thinking LEVEL        Pi thinking level (default: high)
   --model PROVIDER/MODEL  Override the configured Pi model
+  --stack-profile NAME    plain|ssh|routed|continuity|ops|full (default: full)
   --timeout-seconds N     Per-scenario Pi timeout (default: 300)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
@@ -53,6 +55,7 @@ function parseArgs(argv) {
     rescore: null,
     staticOnly: false,
     fixturesOnly: false,
+    stackProfile: "full",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -74,6 +77,9 @@ function parseArgs(argv) {
         break;
       case "--model":
         options.model = value();
+        break;
+      case "--stack-profile":
+        options.stackProfile = value();
         break;
       case "--timeout-seconds":
         options.timeoutSeconds = Number(value());
@@ -104,6 +110,7 @@ function parseArgs(argv) {
   }
 
   if (!LEVELS.has(options.thinking)) throw new Error("invalid --thinking level");
+  if (!profileNames().includes(options.stackProfile)) throw new Error("invalid --stack-profile");
   if (options.limit !== null && (!Number.isInteger(options.limit) || options.limit < 1)) {
     throw new Error("--limit must be a positive integer");
   }
@@ -344,11 +351,12 @@ async function runScenario({ manifest, fixtures }, context) {
       );
     }
 
+    const stackEnvironment = profileEnvironment(options.stackProfile);
     const piArgs = [
       "exec", "-w", "/home/operator",
       "-e", "PI_SKIP_VERSION_CHECK=1",
       "-e", "PI_TELEMETRY=0",
-      "-e", "PI_THINKING_ROUTER=off",
+      ...Object.entries(stackEnvironment).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
       workstation,
       "/usr/bin/timeout", "--signal=TERM", "--kill-after=5",
       `${options.timeoutSeconds}s`,
@@ -358,6 +366,7 @@ async function runScenario({ manifest, fixtures }, context) {
       "--thinking", options.thinking,
       "--session-dir", `${sessionRoot}/sessions`,
       "--name", `incident-bench-${manifest.id}`,
+      ...profileArgs(options.stackProfile),
     ];
     if (options.model) piArgs.push("--model", options.model);
     piArgs.push(manifest.prompt);
@@ -411,6 +420,7 @@ async function runScenario({ manifest, fixtures }, context) {
     model: session.final?.message.model ?? null,
     provider: session.final?.message.provider ?? null,
     thinking: options.thinking,
+    stack_profile: options.stackProfile,
     elapsed_ms: elapsedMs,
     pi_exit: piResult?.code ?? null,
     fixture_unchanged: fixtureUnchanged,

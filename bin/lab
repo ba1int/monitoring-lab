@@ -42,6 +42,7 @@ Usage: lab [command]
   lab benchmark model-matrix [OPTS]
                                    Compare model/thinking candidates
   lab benchmark compaction [OPTS]  Test long-task state continuity
+  lab benchmark system [OPTS]      Compare cumulative Pi stack profiles
   lab benchmark ssh-transport [--json]
                                    Measure proposed SSH transport changes
   lab down                         Stop containers but retain lab state
@@ -605,7 +606,7 @@ shell_service() {
 run_benchmark() {
     local suite
     suite="${1:-}"
-    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|remote-dc-onboarding|model-matrix|compaction|ssh-transport} [OPTIONS]"
+    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|remote-dc-onboarding|model-matrix|compaction|system|ssh-transport} [OPTIONS]"
     shift || true
     require_stack
     need node
@@ -636,6 +637,12 @@ run_benchmark() {
             COMPACTION_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
             COMPACTION_BENCH_WORKSTATION="$(compose ps -q workstation)" \
                 node "$LAB_ROOT/benchmarks/compaction/run.mjs" "$@"
+            ;;
+        system)
+            INCIDENT_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
+            INCIDENT_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
+            INCIDENT_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
+                node "$LAB_ROOT/benchmarks/system/run.mjs" "$@"
             ;;
         ssh-transport)
             SSH_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
