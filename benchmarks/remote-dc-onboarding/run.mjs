@@ -49,6 +49,7 @@ Usage: node run.mjs [options]
   --thinking LEVEL        Pi thinking level (default: high)
   --model PROVIDER/MODEL  Override the configured Pi model
   --router                Enable the installed automatic model router
+  --rescue                Add bounded Sol rescue while keeping Luna as operator
   --timeout-seconds N     Per-scenario Pi timeout (default: 600)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
@@ -67,7 +68,7 @@ function parseArgs(argv) {
     cases: null, limit: null, thinking: "high", model: null,
     timeoutSeconds: 600, outputRoot: DEFAULT_OUTPUT_ROOT, runId: null,
     staticOnly: false, fixturesOnly: false, rescore: null,
-    router: false,
+    router: false, rescue: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -82,6 +83,7 @@ function parseArgs(argv) {
       case "--thinking": options.thinking = value(); break;
       case "--model": options.model = value(); break;
       case "--router": options.router = true; break;
+      case "--rescue": options.rescue = true; break;
       case "--timeout-seconds": options.timeoutSeconds = Number(value()); break;
       case "--output-root": options.outputRoot = value(); break;
       case "--run-id": options.runId = value(); break;
@@ -108,8 +110,9 @@ function parseArgs(argv) {
   if (options.router && options.model) {
     throw new Error("--router cannot be combined with --model");
   }
+  if (options.router && options.rescue) throw new Error("--router and --rescue are mutually exclusive");
   if (options.rescore && (options.staticOnly || options.fixturesOnly || options.runId
-      || options.cases || options.limit !== null || options.router)) {
+      || options.cases || options.limit !== null || options.router || options.rescue)) {
     throw new Error("--rescore cannot be combined with selection, fixture, static, or run-id options");
   }
   return options;
@@ -509,8 +512,12 @@ async function verifySeed(manifest, containers) {
 function parseSession(text) {
   const entries = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const assistants = entries.filter((entry) => entry.type === "message" && entry.message?.role === "assistant");
-  const toolCalls = assistants.flatMap((entry) =>
+  const directToolCalls = assistants.flatMap((entry) =>
     (entry.message.content ?? []).filter((item) => item.type === "toolCall"));
+  const rescueResults = entries.filter((entry) => entry.type === "message"
+    && entry.message?.role === "toolResult" && entry.message?.toolName === "senior_rescue");
+  const nestedToolCalls = rescueResults.flatMap((entry) => entry.message.details?.toolCalls ?? []);
+  const toolCalls = [...directToolCalls, ...nestedToolCalls];
   const final = [...assistants].reverse().find((entry) => entry.message.stopReason === "stop");
   const finalText = (final?.message.content ?? []).filter((item) => item.type === "text")
     .map((item) => item.text).join("\n");
@@ -524,6 +531,10 @@ function parseSession(text) {
     total.cost += current.cost?.total ?? 0;
     return total;
   }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 });
+  for (const entry of rescueResults) {
+    const current = entry.message.details?.usage ?? {};
+    for (const key of Object.keys(usage)) usage[key] += current[key] ?? 0;
+  }
   const modelSequence = entries
     .filter((entry) => entry.type === "model_change")
     .map((entry) => `${entry.provider}/${entry.modelId}`)
@@ -533,7 +544,14 @@ function parseSession(text) {
       && entry.message?.provider && entry.message?.model)
     .map((entry) => `${entry.message.provider}/${entry.message.model}`)
     .filter((model, index, items) => index === 0 || model !== items[index - 1]);
-  return { entries, toolCalls, final, finalText, usage, modelSequence, modelUsageSequence };
+  if (rescueResults.length && !modelUsageSequence.includes("openai-codex/gpt-5.6-sol")) {
+    modelUsageSequence.push("openai-codex/gpt-5.6-sol");
+  }
+  return {
+    entries, toolCalls, final, finalText, usage, modelSequence, modelUsageSequence,
+    rescueCalls: rescueResults.length,
+    rescueFailures: rescueResults.filter((entry) => entry.message.isError).length,
+  };
 }
 
 function toolHosts(session) {
@@ -668,6 +686,7 @@ async function runScenario({ manifest }, context) {
     ];
     if (!options.router) args.push("--thinking", options.thinking);
     if (options.model) args.push("--model", options.model);
+    if (options.rescue) args.push("--extension", "/opt/pi-tools/extensions/senior-rescue/index.ts");
     args.push(manifest.prompt);
     piResult = await docker(args, { captureStdout: false, timeoutMs: (options.timeoutSeconds + 20) * 1_000 });
     sessionText = await readSession(workstation, sessionRoot, manifest.id);
@@ -691,6 +710,9 @@ async function runScenario({ manifest }, context) {
       provider: session.final?.message.provider ?? null,
       thinking: options.router ? "auto" : options.thinking,
       router: options.router,
+      rescue: options.rescue,
+      rescue_calls: session.rescueCalls,
+      rescue_failures: session.rescueFailures,
       model_sequence: session.modelSequence,
       model_usage_sequence: session.modelUsageSequence,
       elapsed_ms: elapsedMs,

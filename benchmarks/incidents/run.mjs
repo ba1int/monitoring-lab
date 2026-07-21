@@ -31,6 +31,7 @@ Usage: node run.mjs [options]
   --limit N               Run only the first N selected scenarios
   --thinking LEVEL        Pi thinking level (default: high)
   --model PROVIDER/MODEL  Override the configured Pi model
+  --rescue                Add the bounded Sol senior-rescue experiment
   --timeout-seconds N     Per-scenario Pi timeout (default: 300)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     rescore: null,
     staticOnly: false,
     fixturesOnly: false,
+    rescue: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -74,6 +76,9 @@ function parseArgs(argv) {
         break;
       case "--model":
         options.model = value();
+        break;
+      case "--rescue":
+        options.rescue = true;
         break;
       case "--timeout-seconds":
         options.timeoutSeconds = Number(value());
@@ -120,7 +125,7 @@ function parseArgs(argv) {
     throw new Error("--static-only and --fixtures-only are mutually exclusive");
   }
   if (options.rescore && (options.staticOnly || options.fixturesOnly || options.runId
-      || options.cases || options.limit !== null)) {
+      || options.cases || options.limit !== null || options.rescue)) {
     throw new Error("--rescore cannot be combined with selection, fixture, static, or run-id options");
   }
   return options;
@@ -215,9 +220,13 @@ function parseSession(text) {
   const assistants = entries.filter(
     (entry) => entry.type === "message" && entry.message?.role === "assistant",
   );
-  const toolCalls = assistants.flatMap((entry) =>
+  const directToolCalls = assistants.flatMap((entry) =>
     (entry.message.content ?? []).filter((item) => item.type === "toolCall"),
   );
+  const rescueResults = entries.filter((entry) => entry.type === "message"
+    && entry.message?.role === "toolResult" && entry.message?.toolName === "senior_rescue");
+  const nestedToolCalls = rescueResults.flatMap((entry) => entry.message.details?.toolCalls ?? []);
+  const toolCalls = [...directToolCalls, ...nestedToolCalls];
   const final = [...assistants].reverse().find(
     (entry) => entry.message.stopReason === "stop",
   );
@@ -235,7 +244,15 @@ function parseSession(text) {
     total.cost += current.cost?.total ?? 0;
     return total;
   }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 });
-  return { entries, assistants, toolCalls, final, finalText, usage };
+  for (const entry of rescueResults) {
+    const current = entry.message.details?.usage ?? {};
+    for (const key of Object.keys(usage)) usage[key] += current[key] ?? 0;
+  }
+  return {
+    entries, assistants, toolCalls, final, finalText, usage,
+    rescueCalls: rescueResults.length,
+    rescueFailures: rescueResults.filter((entry) => entry.message.isError).length,
+  };
 }
 
 async function loadScenarios(options) {
@@ -359,6 +376,9 @@ async function runScenario({ manifest, fixtures }, context) {
       "--session-dir", `${sessionRoot}/sessions`,
       "--name", `incident-bench-${manifest.id}`,
     ];
+    if (options.rescue) {
+      piArgs.push("--extension", "/opt/pi-tools/extensions/senior-rescue/index.ts");
+    }
     if (options.model) piArgs.push("--model", options.model);
     piArgs.push(manifest.prompt);
     piResult = await docker(piArgs, {
@@ -415,6 +435,9 @@ async function runScenario({ manifest, fixtures }, context) {
     pi_exit: piResult?.code ?? null,
     fixture_unchanged: fixtureUnchanged,
     usage: session.usage,
+    rescue: options.rescue,
+    rescue_calls: session.rescueCalls,
+    rescue_failures: session.rescueFailures,
     scoring,
     final_text: session.finalText,
   };
