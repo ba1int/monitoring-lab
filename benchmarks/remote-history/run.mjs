@@ -211,7 +211,7 @@ done
     checks.push(check(`account ${n} exists`, true));
     checks.push(check(`group ${n} recorded`, joined.includes(`sudo groupadd histbenchg${n}`)));
     checks.push(check(`user ${n} recorded`, new RegExp(`^sudo useradd .*histbenchg${n} .*histbench${n}$`, "m").test(joined)));
-    checks.push(check(`account ${n} validation recorded`, joined.includes(`getent passwd histbench${n}`)));
+    checks.push(check(`account ${n} validation recorded`, new RegExp(`^(?:getent passwd|id) histbench${n}$`, "m").test(joined)));
   }
   checks.push(check("password operation recorded", /sudo (?:chpasswd|passwd\b)/m.test(joined)));
   return { id: "pi-bulk-accounts", lines, checks, calls: pi.calls };
