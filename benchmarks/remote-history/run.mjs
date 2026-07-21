@@ -229,11 +229,11 @@ done
   for (let n = 1; n <= 3; n += 1) {
     await execContainer(target, `getent passwd histbench${n}\ngetent group histbenchg${n}\ntest "$(id -gn histbench${n})" = histbenchg${n}\npasswd -S histbench${n} | grep -Eq '^histbench${n} P '\n`);
     checks.push(check(`account ${n} exists`, true));
-    checks.push(check(`group ${n} recorded`, joined.includes(`sudo groupadd histbenchg${n}`)));
-    checks.push(check(`user ${n} recorded`, new RegExp(`^sudo useradd .*histbenchg${n} .*histbench${n}$`, "m").test(joined)));
+    checks.push(check(`group ${n} recorded`, new RegExp(`^sudo(?: -n)? groupadd histbenchg${n}$`, "m").test(joined)));
+    checks.push(check(`user ${n} recorded`, new RegExp(`^sudo(?: -n)? useradd .*histbenchg${n} .*histbench${n}$`, "m").test(joined)));
     checks.push(check(`account ${n} validation recorded`, new RegExp(`^(?:sudo )?(?:getent passwd|id)[^\\n]*\\bhistbench${n}\\b`, "m").test(joined)));
   }
-  checks.push(check("password operation recorded", /sudo (?:chpasswd|passwd\b)/m.test(joined)));
+  checks.push(check("password operation recorded", /^sudo(?: -n)? (?:chpasswd|passwd\b)/m.test(joined)));
   return { id: "pi-bulk-accounts", lines, checks, calls: pi.calls };
 }
 
