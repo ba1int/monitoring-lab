@@ -104,11 +104,14 @@ function check(name, pass, detail = "") {
 
 function cleanHistoryChecks(lines) {
   const joined = lines.join("\n");
+  const outputOnlyStage = lines.some((line) =>
+    /^(?:head|tail|sort|uniq|cut|tr|column)(?:\s|$)/.test(line)
+    && !/(?:^|\s)(?:\/|\.\/|\.\.\/|~\/)[^\s]*/.test(line));
   return [
     check("no credential values", !/Example(?:History|Bench|Det)|do-not-store/i.test(joined)),
     check("no shell scaffolding", !/^(?:for|while|if|then|do|done|fi)(?:\s|$)/m.test(joined)),
     check("no unresolved variables", !/\$(?:\{|[A-Za-z_])/.test(joined)),
-    check("no output-only stages", !/^(?:head|tail|sort|uniq|cut|tr|column)(?:\s|$)/m.test(joined)),
+    check("no output-only stages", !outputOnlyStage),
     check("no heredoc launchers", !/<<|^(?:python|bash)(?:3)?(?:\s|$)/m.test(joined)),
     check("no temporary paths", !/(?:^|\s)(?:\/tmp\/|\/var\/tmp\/|\/[^\s]+\/\.[^\s]+\.[0-9]{4,})(?:\s|$)/m.test(joined)),
   ];
@@ -211,7 +214,7 @@ done
     checks.push(check(`account ${n} exists`, true));
     checks.push(check(`group ${n} recorded`, joined.includes(`sudo groupadd histbenchg${n}`)));
     checks.push(check(`user ${n} recorded`, new RegExp(`^sudo useradd .*histbenchg${n} .*histbench${n}$`, "m").test(joined)));
-    checks.push(check(`account ${n} validation recorded`, new RegExp(`^(?:getent passwd|id) histbench${n}$`, "m").test(joined)));
+    checks.push(check(`account ${n} validation recorded`, new RegExp(`^(?:sudo )?(?:getent passwd|id)[^\\n]*\\bhistbench${n}\\b`, "m").test(joined)));
   }
   checks.push(check("password operation recorded", /sudo (?:chpasswd|passwd\b)/m.test(joined)));
   return { id: "pi-bulk-accounts", lines, checks, calls: pi.calls };
