@@ -114,11 +114,30 @@ function cleanHistoryChecks(lines) {
   ];
 }
 
+function sanitizedSshCalls(jsonLines) {
+  const calls = [];
+  for (const line of jsonLines.split("\n")) {
+    if (!line) continue;
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event.type !== "message_end" || event.message?.role !== "assistant") continue;
+    for (const item of event.message.content ?? []) {
+      if (item.type !== "toolCall" || item.name !== "ssh_exec") continue;
+      const host = String(item.arguments?.host ?? "unknown");
+      const command = String(item.arguments?.command ?? "")
+        .replace(/Example(?:History|Bench|Det)[^\s'\"]*/gi, "[REDACTED]");
+      calls.push({ host, command });
+    }
+  }
+  return calls;
+}
+
 async function runPi(workstation, options, prompt) {
-  const command = "exec pi --no-session --model \"$1\" --thinking \"$2\" --print \"$3\"";
-  return requireSuccess(await run("docker", ["exec", "--user", "operator", workstation,
+  const command = "exec pi --no-session --mode json --model \"$1\" --thinking \"$2\" --print \"$3\"";
+  const result = await requireSuccess(await run("docker", ["exec", "--user", "operator", workstation,
     "/bin/bash", "-lc", command, "pi-history-benchmark", options.model, options.thinking, prompt],
   { timeoutMs: 300_000 }), "Pi benchmark task");
+  return { calls: sanitizedSshCalls(result.stdout) };
 }
 
 async function deterministicNestedCase(workstation, target, remoteProgram) {
@@ -162,7 +181,7 @@ for n in 1 2 3; do getent passwd "histdet\${n}"; getent group "histdetg\${n}"; d
 
 async function healthCase(workstation, target, options) {
   await resetHistory(target);
-  await runPi(workstation, options,
+  const pi = await runPi(workstation, options,
     "Inspect lab-dev-web01 and report its middleware, resource, network, and monitoring health. Make no changes.");
   const lines = await history(target);
   const joined = lines.join("\n");
@@ -171,7 +190,7 @@ async function healthCase(workstation, target, options) {
   checks.push(check("resource inspection retained", /^(?:uptime|free\b|df\b|awk .*\/proc\/meminfo)/m.test(joined)));
   checks.push(check("absent ip utility omitted", !/^ip\b/m.test(joined)));
   checks.push(check("no mutation commands", !/\b(?:useradd|groupadd|install|systemctl restart|rm -)/m.test(joined)));
-  return { id: "pi-health-read-only", lines, checks };
+  return { id: "pi-health-read-only", lines, checks, calls: pi.calls };
 }
 
 async function accountCase(workstation, target, options) {
@@ -182,7 +201,7 @@ for n in 1 2 3; do
 done
 `);
   await resetHistory(target);
-  await runPi(workstation, options,
+  const pi = await runPi(workstation, options,
     "On lab-test-web01 create users histbench1, histbench2, and histbench3 with matching primary groups histbenchg1, histbenchg2, and histbenchg3. Set example passwords ExampleBench1!, ExampleBench2!, and ExampleBench3!, then validate every account, group, and password status.");
   const lines = await history(target);
   const joined = lines.join("\n");
@@ -195,7 +214,7 @@ done
     checks.push(check(`account ${n} validation recorded`, joined.includes(`getent passwd histbench${n}`)));
   }
   checks.push(check("password operation recorded", /sudo (?:chpasswd|passwd\b)/m.test(joined)));
-  return { id: "pi-bulk-accounts", lines, checks };
+  return { id: "pi-bulk-accounts", lines, checks, calls: pi.calls };
 }
 
 async function configCase(workstation, target, options) {
@@ -213,7 +232,7 @@ SCRIPT
 chmod 0755 /usr/local/sbin/pi-history-bench-service
 `);
   await resetHistory(target);
-  await runPi(workstation, options,
+  const pi = await runPi(workstation, options,
     "On lab-dev-app01 create /etc/pi-history-bench.conf containing exactly 'mode=active' using a user-writable temporary file and an atomic sudo installation with mode 0644. Then run sudo /usr/local/sbin/pi-history-bench-service reload and validate it with /usr/local/sbin/pi-history-bench-service status plus a direct config read.");
   await execContainer(target, "test \"$(cat /etc/pi-history-bench.conf)\" = mode=active\ntest -f /run/pi-history-bench-reloaded\n");
   const lines = await history(target);
@@ -223,8 +242,8 @@ chmod 0755 /usr/local/sbin/pi-history-bench-service
   checks.push(check("file change projected", joined.includes("sudoedit /etc/pi-history-bench.conf")));
   checks.push(check("reload retained", joined.includes("sudo /usr/local/sbin/pi-history-bench-service reload")));
   checks.push(check("status retained", joined.includes("/usr/local/sbin/pi-history-bench-service status")));
-  checks.push(check("config read retained", /(?:cat|grep).*\/etc\/pi-history-bench\.conf/m.test(joined)));
-  return { id: "pi-config-deploy", lines, checks };
+  checks.push(check("config read retained", /(?:cat|grep|od).*\/etc\/pi-history-bench\.conf/m.test(joined)));
+  return { id: "pi-config-deploy", lines, checks, calls: pi.calls };
 }
 
 function renderReport(metadata, cases) {
@@ -232,7 +251,11 @@ function renderReport(metadata, cases) {
     const passed = item.checks.filter((entry) => entry.pass).length;
     return `| ${item.id} | ${passed}/${item.checks.length} | ${passed === item.checks.length ? "PASS" : "FAIL"} |`;
   });
-  const details = cases.map((item) => `## ${item.id}\n\n${item.checks.map((entry) => `- ${entry.pass ? "PASS" : "FAIL"}: ${entry.name}`).join("\n")}\n\n\`\`\`text\n${item.lines.join("\n")}\n\`\`\``).join("\n\n");
+  const details = cases.map((item) => {
+    const calls = (item.calls ?? []).map((call) => `${call.host}:\n${call.command}`).join("\n\n");
+    const callSection = calls ? `\n\n### Sanitized Pi SSH calls\n\n\`\`\`bash\n${calls}\n\`\`\`` : "";
+    return `## ${item.id}\n\n${item.checks.map((entry) => `- ${entry.pass ? "PASS" : "FAIL"}: ${entry.name}`).join("\n")}\n\n\`\`\`text\n${item.lines.join("\n")}\n\`\`\`${callSection}`;
+  }).join("\n\n");
   return `# Remote history acceptance\n\nModel: ${metadata.model}\nThinking: ${metadata.thinking}\n\n| Case | Checks | Result |\n|---|---:|---|\n${rows.join("\n")}\n\n${details}\n`;
 }
 
