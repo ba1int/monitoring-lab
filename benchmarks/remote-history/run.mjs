@@ -13,7 +13,7 @@ const STATE_ROOT = process.env.MONITORING_LAB_STATE
   ?? join(homedir(), ".local", "state", "monitoring-lab");
 const OUTPUT_ROOT = join(STATE_ROOT, "benchmarks", "remote-history");
 const PI_TOOLS_ROOT = process.env.MONITORING_LAB_PI_TOOLS;
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 32 * 1024 * 1024;
 
 function parseArgs(argv) {
   const options = {
@@ -145,7 +145,7 @@ async function runPi(workstation, options, prompt) {
 
 async function deterministicNestedCase(workstation, target, remoteProgram) {
   await execContainer(target, `
-for n in 1 2 3; do
+for n in 1 2 3 4; do
   userdel -r "histdet\${n}" >/dev/null 2>&1 || true
   groupdel "histdetg\${n}" >/dev/null 2>&1 || true
 done
@@ -165,14 +165,20 @@ for n in 1 2 3; do
   chage -M 99999 -E -1 "$user"
 done
 ROOT
-for n in 1 2 3; do getent passwd "histdet\${n}"; getent group "histdetg\${n}"; done`;
+GROUPADD=/usr/sbin/groupadd
+USERADD=/usr/sbin/useradd
+CHPASSWD=/usr/sbin/chpasswd
+sudo "$GROUPADD" histdetg4
+sudo "$USERADD" -m -s /bin/bash -g histdetg4 histdet4
+printf '%s:%s\n' histdet4 'DetExample4!' | sudo "$CHPASSWD"
+for n in 1 2 3 4; do getent passwd "histdet\${n}"; getent group "histdetg\${n}"; done`;
   const result = await requireSuccess(await run("docker", ["exec", "-i", "--user", "operator", workstation,
     "ssh", "-T", "-o", "BatchMode=yes", "lab-test-mq01", "exec bash -se"],
   { input: remoteProgram(command) }), "deterministic nested-shell transport");
   const lines = await history(target);
   const joined = lines.join("\n");
   const checks = cleanHistoryChecks(lines);
-  for (let n = 1; n <= 3; n += 1) {
+  for (let n = 1; n <= 4; n += 1) {
     checks.push(check(`group ${n} recorded`, joined.includes(`sudo groupadd histdetg${n}`)));
     checks.push(check(`user ${n} recorded`, joined.includes(`sudo useradd -m -s /bin/bash -g histdetg${n} histdet${n}`)));
     checks.push(check(`user ${n} validated`, joined.includes(`getent passwd histdet${n}`)));
