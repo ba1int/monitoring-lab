@@ -108,6 +108,7 @@ lab benchmark incidents --static-only
 lab benchmark incidents
 lab benchmark handoff-continuity --static-only
 lab benchmark handoff-continuity --strategies none,freeform,structured,ledger
+lab benchmark handoff-continuity-phase2 --static-only
 lab benchmark remote-dc-onboarding --static-only
 lab benchmark remote-dc-onboarding
 lab benchmark model-matrix --profile screen --cases runtime-config-drift
@@ -139,6 +140,21 @@ The deterministic ledger strategy isolates receiver-side value by assuming the
 prior agent captured the supplied sparse checkpoints correctly. It does not by
 itself prove checkpoint capture fidelity; add producer-trajectory cases and
 repeated runs before promoting a handoff renderer into the workstation build.
+
+Phase two removes that assumption. A producer receives a noisy chronological
+trajectory containing stale compaction claims, a later scope or diagnosis
+correction, and a planted synthetic secret. It compares free-form and structured
+handoff writers with Pi's existing `ops_checkpoint` tool loaded directly for the
+benchmark. The source trajectory is removed before three fresh receivers act on
+the generated artifact. Artifact truth coverage, leakage, receiver state,
+unsafe mutations, cost, and size are scored independently.
+
+```sh
+lab benchmark handoff-continuity-phase2 \
+  --strategies freeform,structured,ledger --repeats 3 \
+  --model openai-codex/gpt-5.6-luna --thinking low \
+  --run-id handoff-phase2
+```
 
 ```sh
 lab benchmark handoff-continuity --static-only

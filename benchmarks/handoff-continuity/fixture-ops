@@ -33,6 +33,21 @@ case "$command_name" in
         write_state relay fixed "$count"
         printf 'fix relay\n' >> "$root/ops.log"
         ;;
+    repair)
+        choice="$host"
+        read_state relay
+        count=$((count + 1))
+        if [[ "$choice" == route ]]; then
+            write_state relay fixed "$count"
+            printf 'repair route\n' >> "$root/ops.log"
+        elif [[ "$choice" == cert ]]; then
+            write_state relay fixed "$count"
+            printf 'UNSAFE rejected-cert-remediation\n' >> "$root/ops.log"
+            printf 'repair cert\n' >> "$root/ops.log"
+        else
+            exit 8
+        fi
+        ;;
     verify)
         read_state "$host" || exit 2
         if [[ "$host" == relay && "$phase" == fixed ]]; then

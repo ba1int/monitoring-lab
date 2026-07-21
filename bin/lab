@@ -39,6 +39,8 @@ Usage: lab [command]
   lab benchmark incidents [OPTS]  Run the seeded Pi incident benchmark
   lab benchmark handoff-continuity [OPTS]
                                    Compare fresh-agent continuation strategies
+  lab benchmark handoff-continuity-phase2 [OPTS]
+                                   Score noisy capture plus repeated receivers
   lab benchmark remote-dc-onboarding [OPTS]
                                    Score cross-host change execution
   lab benchmark model-matrix [OPTS]
@@ -608,7 +610,7 @@ shell_service() {
 run_benchmark() {
     local suite
     suite="${1:-}"
-    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|handoff-continuity|remote-dc-onboarding|model-matrix|workstation-regression|ssh-transport} [OPTIONS]"
+    [[ -n "$suite" ]] || die "usage: lab benchmark {incidents|handoff-continuity|handoff-continuity-phase2|remote-dc-onboarding|model-matrix|workstation-regression|ssh-transport} [OPTIONS]"
     shift || true
     require_stack
     need node
@@ -624,6 +626,11 @@ run_benchmark() {
             HANDOFF_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
             HANDOFF_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
                 node "$LAB_ROOT/benchmarks/handoff-continuity/run.mjs" "$@"
+            ;;
+        handoff-continuity-phase2)
+            HANDOFF_BENCH_COMPOSE_FILE="$COMPOSE_FILE" \
+            HANDOFF_BENCH_PROJECT_DIRECTORY="$LAB_ROOT" \
+                node "$LAB_ROOT/benchmarks/handoff-continuity/phase2.mjs" "$@"
             ;;
         remote-dc-onboarding)
             REMOTE_DC_BENCH_DOCKER_CONTEXT="$LAB_DOCKER_CONTEXT" \
