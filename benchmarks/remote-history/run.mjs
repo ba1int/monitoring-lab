@@ -145,7 +145,7 @@ async function runPi(workstation, options, prompt) {
 
 async function deterministicNestedCase(workstation, target, remoteProgram) {
   await execContainer(target, `
-for n in 1 2 3 4; do
+for n in 1 2 3 4 5; do
   userdel -r "histdet\${n}" >/dev/null 2>&1 || true
   groupdel "histdetg\${n}" >/dev/null 2>&1 || true
 done
@@ -171,16 +171,24 @@ CHPASSWD=/usr/sbin/chpasswd
 sudo "$GROUPADD" histdetg4
 sudo "$USERADD" -m -s /bin/bash -g histdetg4 histdet4
 printf '%s:%s\n' histdet4 'DetExample4!' | sudo "$CHPASSWD"
-for n in 1 2 3 4; do getent passwd "histdet\${n}"; getent group "histdetg\${n}"; done`;
+pairs='histdet5:histdetg5:DetExample5!'
+while IFS=: read -r user group password; do
+  sudo -n /usr/sbin/groupadd "$group"
+  sudo -n /usr/sbin/useradd -m -s /bin/bash -g "$group" "$user"
+  printf '%s:%s\n' "$user" "$password"
+done <<EOF | sudo -n /usr/sbin/chpasswd
+$pairs
+EOF
+for n in 1 2 3 4 5; do getent passwd "histdet\${n}"; getent group "histdetg\${n}"; done`;
   const result = await requireSuccess(await run("docker", ["exec", "-i", "--user", "operator", workstation,
     "ssh", "-T", "-o", "BatchMode=yes", "lab-test-mq01", "exec bash -se"],
   { input: remoteProgram(command) }), "deterministic nested-shell transport");
   const lines = await history(target);
   const joined = lines.join("\n");
   const checks = cleanHistoryChecks(lines);
-  for (let n = 1; n <= 4; n += 1) {
-    checks.push(check(`group ${n} recorded`, joined.includes(`sudo groupadd histdetg${n}`)));
-    checks.push(check(`user ${n} recorded`, joined.includes(`sudo useradd -m -s /bin/bash -g histdetg${n} histdet${n}`)));
+  for (let n = 1; n <= 5; n += 1) {
+    checks.push(check(`group ${n} recorded`, new RegExp(`^sudo(?: -n)? groupadd histdetg${n}$`, "m").test(joined)));
+    checks.push(check(`user ${n} recorded`, new RegExp(`^sudo(?: -n)? useradd -m -s /bin/bash -g histdetg${n} histdet${n}$`, "m").test(joined)));
     checks.push(check(`user ${n} validated`, joined.includes(`getent passwd histdet${n}`)));
   }
   checks.push(check("password operation recorded", /sudo (?:chpasswd|passwd\b)/m.test(joined)));
