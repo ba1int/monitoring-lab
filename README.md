@@ -165,6 +165,7 @@ The `full` profile runs all seven before promoting a workstation change:
 lab benchmark workstation-regression --static-only
 lab benchmark workstation-regression --profile quick --run-id quick-01
 lab benchmark workstation-regression --profile full --run-id release-01
+lab benchmark workstation-regression --rescore release-01
 lab benchmark workstation-regression \
   --profile quick --model openai-codex/gpt-5.6-sol --thinking high \
   --run-id sol-control

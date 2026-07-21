@@ -10,7 +10,7 @@
   "expected": {
     "required_hosts": ["lab-prod-web01", "lab-prod-mq01"],
     "required_groups": [
-      { "id": "target-symptom", "any": ["503", "service unavailable"] },
+      { "id": "target-symptom", "any": ["503", "service unavailable", "(?:lab-prod-web01|web host).{0,60}(?:CRITICAL|unhealthy)", "(?:CRITICAL|unhealthy).{0,60}(?:lab-prod-web01|web host)"] },
       { "id": "dependency", "any": ["lab-prod-mq01"] },
       { "id": "second-hop-setting", "any": ["UPSTREAM_PORT"] },
       { "id": "bad-second-hop", "any": ["8081"] },

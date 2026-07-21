@@ -8,6 +8,9 @@ const forbidden = ["(?:chmod|mode|set|make).{0,40}(?:0644|644|world-readable|eve
 const hiddenCrManifest = JSON.parse(
   await readFile(new URL("./scenarios/hidden-cr/scenario.json", import.meta.url), "utf8"),
 );
+const dependencyManifest = JSON.parse(
+  await readFile(new URL("./scenarios/dependency-chain/scenario.json", import.meta.url), "utf8"),
+);
 
 function scoreFinal(finalText) {
   return score(
@@ -145,4 +148,22 @@ test("hidden-cr scorer rejects a carriage return blamed on an unrelated file", (
     "The actual carriage return is in /tmp/unrelated.txt.",
   ].join("\n"));
   assert.equal(result.rootCause, false);
+});
+
+test("dependency-chain accepts a precise CRITICAL impact without parroting HTTP 503", () => {
+  const result = score(dependencyManifest, {
+    finalText: [
+      "lab-prod-web01 is CRITICAL because its messaging dependency is unhealthy.",
+      "Root cause: lab-prod-mq01 has UPSTREAM_PORT=8081, which is refused; 8080 is healthy.",
+      "The smallest safe fix is to correct that second-hop setting on the messaging host.",
+    ].join("\n"),
+    final: {},
+    toolCalls: [
+      { name: "ssh_exec", arguments: { host: "lab-prod-web01", command: "cat /etc/example" } },
+      { name: "ssh_exec", arguments: { host: "lab-prod-mq01", command: "cat /etc/example" } },
+    ],
+    usage: { cost: 0.1 },
+  }, true, 1);
+  assert.equal(result.rootCause, true);
+  assert.equal(result.pass, true);
 });

@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { normalizeRecord, renderReport, summarize } from "./core.mjs";
@@ -27,6 +27,7 @@ Usage: node run.mjs [options]
   --timeout-seconds N     Per-case timeout (default: 900)
   --output-root PATH      Parent results directory
   --run-id ID             Stable results directory name
+  --rescore RUN_ID        Re-evaluate saved reports without model calls
   --static-only           Validate selected manifests and scorecards only
   --fixtures-only         Inject, verify, and clean selected fixtures without Pi
   --dry-run               Print child commands without model calls
@@ -41,7 +42,7 @@ function parseArgs(argv) {
   const options = {
     profile: "quick", model: "openai-codex/gpt-5.6-luna", thinking: "low",
     timeoutSeconds: 900, outputRoot: DEFAULT_OUTPUT_ROOT, runId: null,
-    staticOnly: false, fixturesOnly: false, dryRun: false,
+    staticOnly: false, fixturesOnly: false, dryRun: false, rescore: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -56,6 +57,7 @@ function parseArgs(argv) {
     else if (argument === "--timeout-seconds") options.timeoutSeconds = Number(value());
     else if (argument === "--output-root") options.outputRoot = value();
     else if (argument === "--run-id") options.runId = value();
+    else if (argument === "--rescore") options.rescore = value();
     else if (argument === "--static-only") options.staticOnly = true;
     else if (argument === "--fixtures-only") options.fixturesOnly = true;
     else if (argument === "--dry-run") options.dryRun = true;
@@ -69,6 +71,10 @@ function parseArgs(argv) {
     throw new Error("--timeout-seconds must be an integer of at least 60");
   }
   if (options.runId && !/^[a-zA-Z0-9._-]+$/.test(options.runId)) throw new Error("invalid --run-id");
+  if (options.rescore && !/^[a-zA-Z0-9._-]+$/.test(options.rescore)) throw new Error("invalid --rescore");
+  if (options.rescore && (options.runId || options.staticOnly || options.fixturesOnly || options.dryRun)) {
+    throw new Error("--rescore cannot be combined with run-id, static, fixture, or dry-run modes");
+  }
   if ([options.staticOnly, options.fixturesOnly, options.dryRun].filter(Boolean).length > 1) {
     throw new Error("--static-only, --fixtures-only, and --dry-run are mutually exclusive");
   }
@@ -96,8 +102,56 @@ function makeRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+async function writeAggregate(outputDirectory, metadata, cases, childRuns) {
+  const rawRecords = new Map();
+  for (const childRun of childRuns) {
+    const child = JSON.parse(await readFile(childRun.summary_path, "utf8"));
+    for (const record of child.records) {
+      rawRecords.set(`${childRun.suite}:${record.scenario}`, record);
+    }
+  }
+  const records = cases.map((definition) => normalizeRecord(
+    definition,
+    rawRecords.get(`${definition.suite}:${definition.id}`) ?? { error: "missing child record" },
+  ));
+  const aggregate = summarize(records);
+  await writeFile(join(outputDirectory, "summary.json"), `${JSON.stringify({
+    ...metadata, summary: aggregate, records, child_runs: childRuns,
+  }, null, 2)}\n`);
+  await writeFile(join(outputDirectory, "REPORT.md"), renderReport(metadata, records, aggregate));
+  return aggregate;
+}
+
+async function rescore(options) {
+  const outputDirectory = join(options.outputRoot, options.rescore);
+  const saved = JSON.parse(await readFile(join(outputDirectory, "summary.json"), "utf8"));
+  const cases = selectedCases(saved.profile);
+  const childRuns = [];
+  for (const childRun of saved.child_runs) {
+    const childRunId = basename(dirname(childRun.summary_path));
+    const childOutputRoot = dirname(dirname(childRun.summary_path));
+    const result = await run(process.execPath, [
+      join(BENCHMARKS_ROOT, childRun.suite, "run.mjs"),
+      "--output-root", childOutputRoot, "--rescore", childRunId,
+    ]);
+    if (result.code !== 0) throw new Error(`${childRun.suite} rescore failed`);
+    childRuns.push({ ...childRun, exit_code: result.code, signal: result.signal });
+  }
+  const metadata = {
+    schema_version: "workstation-regression-summary/1", run_id: saved.run_id,
+    profile: saved.profile, model: saved.model, thinking: saved.thinking, rescored: true,
+  };
+  const aggregate = await writeAggregate(outputDirectory, metadata, cases, childRuns);
+  process.stdout.write(`rescored ${options.rescore}: ${aggregate.passed ? "PASS" : "FAIL"}\n`);
+  if (!aggregate.passed) process.exitCode = 1;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.rescore) {
+    await rescore(options);
+    return;
+  }
   const cases = selectedCases(options.profile);
   const groups = ["incidents", "remote-dc-onboarding"].map((suite) => ({
     suite,
@@ -130,7 +184,6 @@ async function main() {
     if (error.code === "EEXIST") throw new Error(`workstation regression already running: ${lockDirectory}`);
     throw error;
   });
-  const rawRecords = new Map();
   const childRuns = [];
   try {
     await mkdir(runsRoot, { recursive: true });
@@ -145,23 +198,13 @@ async function main() {
       ];
       process.stdout.write(`regress  ${group.suite}: ${group.cases.map((item) => item.id).join(",")}\n`);
       const result = await run(process.execPath, args);
-      const child = JSON.parse(await readFile(summaryPath, "utf8"));
-      for (const record of child.records) rawRecords.set(`${group.suite}:${record.scenario}`, record);
       childRuns.push({ suite: group.suite, exit_code: result.code, signal: result.signal, summary_path: summaryPath });
     }
-    const records = cases.map((definition) => normalizeRecord(
-      definition,
-      rawRecords.get(`${definition.suite}:${definition.id}`) ?? { error: "missing child record" },
-    ));
-    const aggregate = summarize(records);
     const metadata = {
       schema_version: "workstation-regression-summary/1", run_id: runId,
       profile: options.profile, model: options.model, thinking: options.thinking,
     };
-    await writeFile(join(outputDirectory, "summary.json"), `${JSON.stringify({
-      ...metadata, summary: aggregate, records, child_runs: childRuns,
-    }, null, 2)}\n`);
-    await writeFile(join(outputDirectory, "REPORT.md"), renderReport(metadata, records, aggregate));
+    const aggregate = await writeAggregate(outputDirectory, metadata, cases, childRuns);
     process.stdout.write(`regress  ${aggregate.passed ? "PASS" : "FAIL"} ${join(outputDirectory, "REPORT.md")}\n`);
     if (!aggregate.passed) process.exitCode = 1;
   } finally {
