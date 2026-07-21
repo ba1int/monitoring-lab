@@ -667,18 +667,10 @@ verify_lab() {
         test -L "$HOME/.pi/agent/extensions/ssh-direct"
         test "$(readlink "$HOME/.pi/agent/extensions/ssh-direct")" = \
             /opt/pi-tools/extensions/ssh-direct
-        test -L "$HOME/.pi/agent/extensions/thinking-router"
-        test "$(readlink "$HOME/.pi/agent/extensions/thinking-router")" = \
-            /opt/pi-tools/extensions/thinking-router
-        test -L "$HOME/.pi/agent/extensions/context-sentinel"
-        test "$(readlink "$HOME/.pi/agent/extensions/context-sentinel")" = \
-            /opt/pi-tools/extensions/context-sentinel
-        test -L "$HOME/.pi/agent/extensions/task-ledger"
-        test "$(readlink "$HOME/.pi/agent/extensions/task-ledger")" = \
-            /opt/pi-tools/extensions/task-ledger
-        test -x "$HOME/.local/bin/pi-ledger"
-        test "$(readlink "$HOME/.local/bin/pi-ledger")" = \
-            /opt/pi-tools/bin/pi-ledger
+        test ! -e "$HOME/.pi/agent/extensions/thinking-router"
+        test ! -e "$HOME/.pi/agent/extensions/context-sentinel"
+        test ! -e "$HOME/.pi/agent/extensions/side-task"
+        test ! -e "$HOME/.pi/agent/extensions/task-ledger"
         test -x "$HOME/.local/bin/study"
         test "$(readlink "$HOME/.local/bin/study")" = \
             /opt/study-room/bin/study
@@ -704,7 +696,10 @@ verify_lab() {
             (has("packages") | not) and
             .compaction.enabled == true and
             .compaction.reserveTokens == 68000 and
-            .compaction.keepRecentTokens == 20000
+            .compaction.keepRecentTokens == 20000 and
+            .defaultProvider == "openai-codex" and
+            .defaultModel == "gpt-5.6-luna" and
+            .defaultThinkingLevel == "low"
         '"'"' "$HOME/.pi/agent/settings.json" >/dev/null
         test ! -e "$HOME/.pi/agent/extensions/protocol-ops"
         for removed_tool in hop peek kb pulse pi-safe; do

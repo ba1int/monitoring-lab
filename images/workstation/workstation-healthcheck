@@ -10,26 +10,23 @@ test -s "$HOME/.local/state/monitoring-lab/workstation-ready"
 test -r "$HOME/.ssh/config"
 test -r "$HOME/.config/nvim/init.vim"
 test -r "$HOME/.config/zellij/config.kdl"
-for tool in bash ssh node npm nvim zellij fzf rg bat pi pi-ledger; do
+for tool in bash ssh node npm nvim zellij fzf rg bat pi; do
     command -v "$tool" >/dev/null
 done
 
 node - "$HOME/.pi/agent/settings.json" \
     "$HOME/.pi/agent/extensions/ssh-direct" \
-    "$HOME/.pi/agent/extensions/thinking-router" \
-    "$HOME/.pi/agent/extensions/task-ledger" \
-    "$HOME/.local/bin/pi-ledger" \
     "$HOME/.pi/agent/skills/incident-investigation" \
     "$HOME/.pi/agent/skills/lab-middleware-health" \
     "$HOME/.pi/agent/skills/lab-host-onboarding" <<'NODE'
 const fs = require('node:fs');
-const [settingsPath, extensionPath, routerPath, ledgerPath, ledgerViewerPath, incidentSkillPath, labSkillPath, onboardingSkillPath] = process.argv.slice(2);
+const [settingsPath, extensionPath, incidentSkillPath, labSkillPath, onboardingSkillPath] = process.argv.slice(2);
 const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 if ('packages' in settings
+    || settings.defaultProvider !== 'openai-codex'
+    || settings.defaultModel !== 'gpt-5.6-luna'
+    || settings.defaultThinkingLevel !== 'low'
     || !fs.realpathSync(extensionPath).endsWith('/opt/pi-tools/extensions/ssh-direct')
-    || !fs.realpathSync(routerPath).endsWith('/opt/pi-tools/extensions/thinking-router')
-    || !fs.realpathSync(ledgerPath).endsWith('/opt/pi-tools/extensions/task-ledger')
-    || !fs.realpathSync(ledgerViewerPath).endsWith('/opt/pi-tools/bin/pi-ledger')
     || !fs.realpathSync(incidentSkillPath).endsWith('/opt/pi-tools/skills/incident-investigation')
     || !fs.realpathSync(labSkillPath).endsWith('/opt/monitoring-lab/skills/lab-middleware-health')
     || !fs.realpathSync(onboardingSkillPath).endsWith('/opt/monitoring-lab/skills/lab-host-onboarding')) {
