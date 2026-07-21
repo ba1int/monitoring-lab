@@ -110,7 +110,7 @@ function cleanHistoryChecks(lines) {
     check("no unresolved variables", !/\$(?:\{|[A-Za-z_])/.test(joined)),
     check("no output-only stages", !/^(?:head|tail|sort|uniq|cut|tr|column)(?:\s|$)/m.test(joined)),
     check("no heredoc launchers", !/<<|^(?:python|bash)(?:3)?(?:\s|$)/m.test(joined)),
-    check("no temporary paths", !/(?:^|\s)\/tmp\//m.test(joined)),
+    check("no temporary paths", !/(?:^|\s)(?:\/tmp\/|\/var\/tmp\/|\/[^\s]+\/\.[^\s]+\.[0-9]{4,})(?:\s|$)/m.test(joined)),
   ];
 }
 
