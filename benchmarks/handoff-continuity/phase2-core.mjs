@@ -30,18 +30,22 @@ function summarize(records) {
     if (!groups.has(record.strategy)) groups.set(record.strategy, []);
     groups.get(record.strategy).push(record);
   }
-  return [...groups.entries()].map(([strategy, samples]) => ({
-    strategy,
-    artifactAverage: average(samples.map((sample) => sample.artifact.score)),
-    artifactMinimum: Math.min(...samples.map((sample) => sample.artifact.score)),
-    artifactSafety: average(samples.map((sample) => Number(sample.artifact.safe))),
-    receiverAverage: average(samples.flatMap((sample) => sample.receivers.map((receiver) => receiver.scoring.score))),
-    receiverMinimum: Math.min(...samples.flatMap((sample) => sample.receivers.map((receiver) => receiver.scoring.score))),
-    receiverSafety: average(samples.flatMap((sample) => sample.receivers.map((receiver) => Number(receiver.scoring.safe)))),
-    producerCost: samples.reduce((sum, sample) => sum + sample.producer.usage.cost, 0),
-    receiverCost: samples.reduce((sum, sample) => sum + sample.receivers.reduce((inner, receiver) => inner + receiver.usage.cost, 0), 0),
-    averageBytes: average(samples.map((sample) => sample.artifact.bytes)),
-  })).sort((left, right) => right.receiverSafety - left.receiverSafety
+  return [...groups.entries()].map(([strategy, samples]) => {
+    const receiverScores = samples.flatMap((sample) => sample.receivers.map((receiver) => receiver.scoring.score));
+    const receiverSafety = samples.flatMap((sample) => sample.receivers.map((receiver) => Number(receiver.scoring.safe)));
+    return {
+      strategy,
+      artifactAverage: average(samples.map((sample) => sample.artifact.score)),
+      artifactMinimum: Math.min(...samples.map((sample) => sample.artifact.score)),
+      artifactSafety: average(samples.map((sample) => Number(sample.artifact.safe))),
+      receiverAverage: receiverScores.length ? average(receiverScores) : null,
+      receiverMinimum: receiverScores.length ? Math.min(...receiverScores) : null,
+      receiverSafety: receiverSafety.length ? average(receiverSafety) : null,
+      producerCost: samples.reduce((sum, sample) => sum + sample.producer.usage.cost, 0),
+      receiverCost: samples.reduce((sum, sample) => sum + sample.receivers.reduce((inner, receiver) => inner + receiver.usage.cost, 0), 0),
+      averageBytes: average(samples.map((sample) => sample.artifact.bytes)),
+    };
+  }).sort((left, right) => (right.receiverSafety ?? -1) - (left.receiverSafety ?? -1)
     || right.receiverAverage - left.receiverAverage
     || right.artifactAverage - left.artifactAverage
     || (left.producerCost + left.receiverCost) - (right.producerCost + right.receiverCost));
@@ -56,7 +60,9 @@ function renderReport(runId, records, summary, repeats) {
     "|---|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const item of summary) {
-    lines.push(`| ${item.strategy} | ${item.artifactAverage.toFixed(1)}/${item.artifactMinimum} | ${(item.artifactSafety * 100).toFixed(0)}% | ${item.receiverAverage.toFixed(1)}/${item.receiverMinimum} | ${(item.receiverSafety * 100).toFixed(0)}% | $${item.producerCost.toFixed(3)} | $${item.receiverCost.toFixed(3)} | ${Math.round(item.averageBytes)} B |`);
+    const receiverResult = item.receiverAverage === null ? "—" : `${item.receiverAverage.toFixed(1)}/${item.receiverMinimum}`;
+    const receiverSafe = item.receiverSafety === null ? "—" : `${(item.receiverSafety * 100).toFixed(0)}%`;
+    lines.push(`| ${item.strategy} | ${item.artifactAverage.toFixed(1)}/${item.artifactMinimum} | ${(item.artifactSafety * 100).toFixed(0)}% | ${receiverResult} | ${receiverSafe} | $${item.producerCost.toFixed(3)} | $${item.receiverCost.toFixed(3)} | ${Math.round(item.averageBytes)} B |`);
   }
   lines.push("", "## Cases", "", "| Scenario | Strategy | Artifact | Leak-free | Receiver scores | Receiver safety |", "|---|---|---:|---:|---|---:|");
   for (const record of records) {

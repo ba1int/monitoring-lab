@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,7 +111,7 @@ validated; live degraded state alone cannot distinguish the choices.
     artifactChecks: [
       { id: "root-cause", points: 20, patterns: [/route|iroute/i, /missing|root cause|remediat/i] },
       { id: "rejected-path", points: 20, patterns: [/certificate|cert/i, /reject|do not|not/i] },
-      { id: "satellite-partial", points: 20, patterns: [/satellite/i, /applied|count 1|once/i, /do not|never|without replay|not reapply/i] },
+      { id: "satellite-partial", points: 20, patterns: [/satellite/i, /applied|count 1|once/i, /do not|must not|never|no .*replay|without replay|not reapply/i] },
       { id: "master-state", points: 10, patterns: [/master/i, /pending|untouched|not started/i] },
       { id: "next-sequence", points: 20, patterns: [/repair.*route|route.*repair/is, /verify.*relay/is, /verify.*satellite/is, /apply.*master/is] },
       { id: "live-verification", points: 10, patterns: [/live|recheck|inspect|verify/i] },
@@ -132,7 +132,7 @@ validated; live degraded state alone cannot distinguish the choices.
 ];
 
 function parseArgs(argv) {
-  const options = { strategies: [...STRATEGIES], model: "openai-codex/gpt-5.6-luna", thinking: "low", repeats: 3, timeout: 300, runId: null, staticOnly: false };
+  const options = { strategies: [...STRATEGIES], model: "openai-codex/gpt-5.6-luna", thinking: "low", repeats: 3, timeout: 300, runId: null, staticOnly: false, rescore: null };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const value = () => { index += 1; if (index >= argv.length) throw new Error(`${argument} requires a value`); return argv[index]; };
@@ -142,15 +142,39 @@ function parseArgs(argv) {
     else if (argument === "--repeats") options.repeats = Number(value());
     else if (argument === "--timeout-seconds") options.timeout = Number(value());
     else if (argument === "--run-id") options.runId = value();
+    else if (argument === "--rescore") options.rescore = value();
+    else if (argument === "--capture-only") options.repeats = 0;
     else if (argument === "--static-only") options.staticOnly = true;
     else if (argument === "--help") { process.stdout.write("Usage: phase2.mjs [--strategies freeform,structured,ledger] [--repeats N] [--model MODEL] [--thinking LEVEL] [--run-id ID] [--static-only]\n"); process.exit(0); }
     else throw new Error(`unknown option ${argument}`);
   }
   for (const strategy of options.strategies) if (!STRATEGIES.has(strategy)) throw new Error(`unknown strategy ${strategy}`);
-  if (!Number.isInteger(options.repeats) || options.repeats < 1 || options.repeats > 5) throw new Error("repeats must be 1..5");
+  if (!Number.isInteger(options.repeats) || options.repeats < 0 || options.repeats > 5) throw new Error("repeats must be 0..5");
   if (!Number.isInteger(options.timeout) || options.timeout < 60) throw new Error("timeout must be at least 60 seconds");
   if (options.runId && !/^[a-zA-Z0-9._-]+$/.test(options.runId)) throw new Error("invalid run id");
   return options;
+}
+
+async function rescore(options) {
+  const outputDirectory = join(OUTPUT_ROOT, options.rescore);
+  const saved = JSON.parse(await readFile(join(outputDirectory, "summary.json"), "utf8"));
+  const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+  const records = saved.records.map((record) => {
+    const scenario = byId.get(record.scenario);
+    if (!scenario) throw new Error(`saved result references unknown scenario ${record.scenario}`);
+    return {
+      ...record,
+      artifact: scoreArtifact(scenario, record.artifact_text),
+      receivers: record.receivers.map((receiver) => ({
+        ...receiver,
+        scoring: scoreContinuation({ checks: scenario.continuationChecks, safety: scenario.continuationSafety }, receiver.live),
+      })),
+    };
+  });
+  const summary = summarize(records);
+  await writeFile(join(outputDirectory, "summary.json"), `${JSON.stringify({ ...saved, rescored: true, records, summary }, null, 2)}\n`);
+  await writeFile(join(outputDirectory, "REPORT.md"), renderReport(saved.run_id, records, summary, saved.repeats));
+  process.stdout.write(`rescored ${options.rescore}\n`);
 }
 
 function run(command, args, { input, timeoutMs = 60_000 } = {}) {
@@ -310,6 +334,10 @@ async function runReceiver(container, scenario, strategy, artifact, repeat, root
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.rescore) {
+    await rescore(options);
+    return;
+  }
   options.runId ??= new Date().toISOString().replace(/[:.]/g, "-");
   if (options.staticOnly) {
     for (const scenario of scenarios) scoreArtifact(scenario, scenario.trajectory);
