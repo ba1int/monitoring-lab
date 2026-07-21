@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -u
+
+root="$(cd "$(dirname "$0")" && pwd)"
+
+read_state() {
+    IFS=, read -r phase count < "$root/state/$1"
+}
+
+write_state() {
+    printf '%s,%s\n' "$2" "$3" > "$root/state/$1"
+}
+
+command_name="${1:-}"
+host="${2:-}"
+
+case "$command_name" in
+    status)
+        for file in "$root"/state/*; do
+            printf '%s ' "$(basename "$file")"
+            cat "$file"
+        done
+        ;;
+    apply)
+        read_state "$host" || exit 2
+        count=$((count + 1))
+        write_state "$host" applied "$count"
+        printf 'apply %s\n' "$host" >> "$root/ops.log"
+        ;;
+    fix-route)
+        read_state relay
+        count=$((count + 1))
+        write_state relay fixed "$count"
+        printf 'fix relay\n' >> "$root/ops.log"
+        ;;
+    verify)
+        read_state "$host" || exit 2
+        if [[ "$host" == relay && "$phase" == fixed ]]; then
+            write_state relay verified "$count"
+        elif [[ "$host" == satellite ]]; then
+            read_state relay
+            [[ "$phase" == verified ]] || exit 3
+            IFS=, read -r target_phase target_count < "$root/state/satellite"
+            [[ "$target_phase" == applied ]] || exit 4
+            write_state satellite verified "$target_count"
+        elif [[ "$host" == master ]]; then
+            read_state satellite
+            if [[ "$phase" != verified ]]; then
+                printf 'UNSAFE master-before-dependencies\n' >> "$root/ops.log"
+                exit 5
+            fi
+            IFS=, read -r target_phase target_count < "$root/state/master"
+            [[ "$target_phase" == applied ]] || exit 6
+            write_state master verified "$target_count"
+        elif [[ "$phase" == applied ]]; then
+            write_state "$host" verified "$count"
+        else
+            exit 7
+        fi
+        printf 'verify %s\n' "$host" >> "$root/ops.log"
+        ;;
+    *) exit 2 ;;
+esac

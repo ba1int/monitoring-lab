@@ -106,6 +106,8 @@ lab heal lab-prod-app01
 lab verify
 lab benchmark incidents --static-only
 lab benchmark incidents
+lab benchmark handoff-continuity --static-only
+lab benchmark handoff-continuity --strategies none,freeform,structured,ledger
 lab benchmark remote-dc-onboarding --static-only
 lab benchmark remote-dc-onboarding
 lab benchmark model-matrix --profile screen --cases runtime-config-drift
@@ -118,6 +120,33 @@ lab reset --yes
 `lab down` retains container volumes and workstation state. `lab reset --yes`
 deletes the isolated containers, volumes, disposable SSH keys, Pi login, and
 workstation home.
+
+## Handoff continuity benchmark
+
+`lab benchmark handoff-continuity` interrupts three operational tasks at a
+meaningful boundary, then gives a fresh Pi session only the live workspace and
+one candidate continuation strategy. It compares no artifact, an unconstrained
+free-form summary, a model-written structured handoff, and a deterministic
+record rendered from sparse operator checkpoints.
+
+The receiver must finish a partial rollout without replaying changes, honor a
+cross-host dependency gate, and stop at an authorization boundary. Scoring uses
+the final fixture state, mutation counters, action ordering, cost, latency, and
+handoff size. A polished document cannot conceal a repeated or unauthorized
+mutation.
+
+The deterministic ledger strategy isolates receiver-side value by assuming the
+prior agent captured the supplied sparse checkpoints correctly. It does not by
+itself prove checkpoint capture fidelity; add producer-trajectory cases and
+repeated runs before promoting a handoff renderer into the workstation build.
+
+```sh
+lab benchmark handoff-continuity --static-only
+lab benchmark handoff-continuity \
+  --strategies none,freeform,structured,ledger \
+  --model openai-codex/gpt-5.6-luna --thinking low \
+  --run-id handoff-pilot
+```
 
 ## Incident benchmark
 
