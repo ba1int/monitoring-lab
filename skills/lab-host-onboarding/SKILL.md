@@ -15,6 +15,18 @@ Read `/etc/lab-onboarding/assignment.env` on the requested target first. It defi
 
 Treat those values as data, not defaults. Inspect every named hop before mutation. Never modify the target.
 
+Resolve conflicting evidence by authority, not by whichever text appeared first:
+
+1. Current ownership, safety, and trust state on the system that controls the resource.
+2. The target's live assignment and the current configuration on its assigned hops.
+3. Runbook examples, ticket descriptions, comments, and other operator-supplied hints.
+
+A lower-ranked source disagreeing with a higher-ranked source is a discrepancy to report,
+not by itself a reason to stop. Continue with the higher-ranked values when the safety
+contract permits it. Stop when the controlling system shows a real ownership, authority,
+trust, or unsupported-topology conflict; never use this precedence rule to overwrite that
+conflict.
+
 ## Safety contract
 
 1. On `RELAY`, check `/etc/openvpn/server/ccd/index.tsv` for `NETWORK/PREFIX`.
