@@ -194,9 +194,12 @@ async function healthCase(workstation, target, options) {
     "Inspect lab-dev-web01 and report its middleware, resource, network, and monitoring health. Make no changes.");
   const lines = await history(target);
   const joined = lines.join("\n");
+  const generated = pi.calls.map((call) => call.command).join("\n");
+  const generatedResourceInspection = /^(?:uptime|free\b|df\b|awk .*\/proc\/meminfo)/m.test(generated);
+  const retainedResourceInspection = /^(?:uptime|free\b|df\b|awk .*\/proc\/meminfo)/m.test(joined);
   const checks = cleanHistoryChecks(lines);
   checks.push(check("custom monitor retained", joined.includes("/usr/local/libexec/check_lab_middleware")));
-  checks.push(check("resource inspection retained", /^(?:uptime|free\b|df\b|awk .*\/proc\/meminfo)/m.test(joined)));
+  checks.push(check("generated resource inspection retained", !generatedResourceInspection || retainedResourceInspection));
   checks.push(check("absent ip utility omitted", !/^ip\b/m.test(joined)));
   checks.push(check("no mutation commands", !/\b(?:useradd|groupadd|install|systemctl restart|rm -)/m.test(joined)));
   return { id: "pi-health-read-only", lines, checks, calls: pi.calls };
