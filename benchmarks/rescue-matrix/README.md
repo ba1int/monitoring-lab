@@ -23,6 +23,9 @@ node benchmarks/rescue-matrix/run.mjs --run-id rescue-screen
 The runner does not install or enable the rescue profile on a workstation. It
 loads the experimental extension explicitly for strategy B.
 
+The reactive prototype is currently **rejected**. See [DECISION.md](DECISION.md)
+for the activation audit and the measured reason it did not earn promotion.
+
 ## Upstream benchmark audit
 
 SREGym commit `e94555365265a110798a85957173a7bd22cabd56` was evaluated as an
