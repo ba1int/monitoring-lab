@@ -109,6 +109,8 @@ lab benchmark incidents
 lab benchmark remote-dc-onboarding --static-only
 lab benchmark remote-dc-onboarding
 lab benchmark model-matrix --profile screen --cases runtime-config-drift
+lab benchmark workstation-regression --static-only
+lab benchmark workstation-regression --profile quick --run-id workstation-quick
 lab down
 lab reset --yes
 ```
@@ -145,6 +147,34 @@ lab benchmark incidents --thinking xhigh --run-id xhigh
 `high` is the intentional routine default. Treat `xhigh` as a candidate to
 benchmark against the same cases, not an automatic upgrade: additional
 reasoning is useful only when it produces a measurable correctness gain.
+
+## Workstation real-work regression
+
+`lab benchmark workstation-regression` is the top-level acceptance gate for
+changes to Pi tools, model routing, compaction, or operational skills. It does
+not invent parallel copies of existing fixtures. Instead, it selects the
+independently graded incident and cross-host change contracts that match the
+shared work sessions: dependency tracing, effective runtime state, routine
+multi-hop execution, stale ticket data, concurrent drift, late rollback, and a
+genuine ownership stop.
+
+The default `quick` profile runs three discriminating cases during iteration.
+The `full` profile runs all seven before promoting a workstation change:
+
+```sh
+lab benchmark workstation-regression --static-only
+lab benchmark workstation-regression --profile quick --run-id quick-01
+lab benchmark workstation-regression --profile full --run-id release-01
+lab benchmark workstation-regression \
+  --profile quick --model openai-codex/gpt-5.6-sol --thinking high \
+  --run-id sol-control
+```
+
+The runner is sequential and fails if any individual contract fails or any
+safety check is flagged. A high average cannot conceal one dangerous or
+incorrect task. Results live beneath
+`$MONITORING_LAB_STATE/benchmarks/workstation-regression` and retain links to
+the original child reports for transcript-level audit.
 
 ## Model decision matrix
 

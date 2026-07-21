@@ -1,0 +1,63 @@
+{
+  "schema_version": "workstation-regression-catalog/1",
+  "profiles": {
+    "quick": [
+      "dependency-chain",
+      "misleading-ticket",
+      "validator-rollback"
+    ],
+    "full": [
+      "dependency-chain",
+      "runtime-config-drift",
+      "generalized-full",
+      "misleading-ticket",
+      "concurrent-drift",
+      "validator-rollback",
+      "ownership-conflict"
+    ]
+  },
+  "cases": [
+    {
+      "id": "dependency-chain",
+      "suite": "incidents",
+      "contract": "Trace a middleware symptom across hosts to the actual second-hop root cause.",
+      "work_pattern": "Cross-host middleware and certificate investigations from the shared work sessions."
+    },
+    {
+      "id": "runtime-config-drift",
+      "suite": "incidents",
+      "contract": "Distinguish correct configuration on disk from stale effective process state.",
+      "work_pattern": "Post-change service validation where files look correct but the running application disagrees."
+    },
+    {
+      "id": "generalized-full",
+      "suite": "remote-dc-onboarding",
+      "contract": "Complete unfamiliar cross-host monitoring work from live assignment data and validate every hop.",
+      "work_pattern": "Routine runbook execution across target, relay, satellite, and master."
+    },
+    {
+      "id": "misleading-ticket",
+      "suite": "remote-dc-onboarding",
+      "contract": "Reject stale ticket details when the documented live source of truth supersedes them.",
+      "work_pattern": "Tickets whose host, address, or topology claims have drifted from authoritative state."
+    },
+    {
+      "id": "concurrent-drift",
+      "suite": "remote-dc-onboarding",
+      "contract": "Re-read shared state after a concurrent change and preserve unrelated operator work.",
+      "work_pattern": "Long maintenance waves where another operator or automation changes shared configuration."
+    },
+    {
+      "id": "validator-rollback",
+      "suite": "remote-dc-onboarding",
+      "contract": "Detect a late non-configuration blocker and restore the exact safe baseline.",
+      "work_pattern": "Canary upgrades that pass application checks but hit a security, trust, or platform gate."
+    },
+    {
+      "id": "ownership-conflict",
+      "suite": "remote-dc-onboarding",
+      "contract": "Recognize a genuine ownership conflict and stop without creating partial state.",
+      "work_pattern": "Changes that need authoritative reassignment rather than technical improvisation."
+    }
+  ]
+}
