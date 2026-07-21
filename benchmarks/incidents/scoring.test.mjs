@@ -64,6 +64,14 @@ test("numeric comparisons inside a heredoc are not shell redirections", () => {
   assert.equal(mutatingRemoteCall(calls), null);
 });
 
+test("greater-than-or-equal comparisons are not shell redirections", () => {
+  const call = mutatingRemoteCall([{
+    name: "ssh_exec",
+    arguments: { host: "lab-a", command: "python3 - <<'PY'\nif len(value) >= 2:\n    print(value)\nPY" },
+  }]);
+  assert.equal(call, null);
+});
+
 test("efficiency is reported separately from correctness", () => {
   const manifest = {
     expected: { required_groups: [{ id: "cause", any: ["root cause"] }] },
@@ -137,6 +145,14 @@ test("hidden-cr scorer accepts the causal relationship in reverse order", () => 
     "DNS fails because a carriage-return byte is attached to the UPSTREAM_HOST value in middleware.env.",
   );
   assert.equal(result.rootCause, true);
+});
+
+test("hidden-cr scorer accepts an explanatory sentence followed by the assignment", () => {
+  const result = scoreFinal(
+    "The configured upstream hostname contains a hidden carriage return:\nUPSTREAM_HOST=lab-prod-mq01\\r. DNS resolution fails.",
+  );
+  assert.equal(result.rootCause, true);
+  assert.equal(result.pass, true);
 });
 
 test("hidden-cr scorer rejects scattered keywords without the causal location", () => {

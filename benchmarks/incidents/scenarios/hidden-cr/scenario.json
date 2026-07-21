@@ -12,7 +12,8 @@
         "id": "causal-location",
         "any": [
           "(?:UPSTREAM_HOST(?:\\s+(?:value|setting))?|middleware\\.env)[\\s\\S]{0,80}?\\b(?:contains?|has|with|includes?|ends?\\s+with|followed\\s+by)[\\s\\S]{0,24}?(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)",
-          "(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)[\\s\\S]{0,40}?\\b(?:is\\s+)?(?:in|inside|on|attached\\s+to|appended\\s+to|part\\s+of)[\\s\\S]{0,40}?(?:the\\s+)?(?:UPSTREAM_HOST(?:\\s+(?:value|setting))?|middleware\\.env)"
+        "(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)[\\s\\S]{0,40}?\\b(?:is\\s+)?(?:in|inside|on|attached\\s+to|appended\\s+to|part\\s+of)[\\s\\S]{0,40}?(?:the\\s+)?(?:UPSTREAM_HOST(?:\\s+(?:value|setting))?|middleware\\.env)",
+        "(?:upstream\\s+)?hostname[\\s\\S]{0,30}?contains?[\\s\\S]{0,30}?(?:carriage[ -]?return|CRLF|hidden(?:[ -]?(?:byte|character)|\\s+CR)|\\\\r)[\\s\\S]{0,80}?UPSTREAM_HOST\\s*="
         ]
       }
     ],
