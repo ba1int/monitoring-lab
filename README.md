@@ -111,6 +111,7 @@ lab benchmark remote-dc-onboarding
 lab benchmark model-matrix --profile screen --cases runtime-config-drift
 lab benchmark workstation-regression --static-only
 lab benchmark workstation-regression --profile quick --run-id workstation-quick
+lab benchmark remote-history --run-id history-candidate
 lab down
 lab reset --yes
 ```
